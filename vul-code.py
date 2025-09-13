@@ -27,7 +27,7 @@ def init_db():
 
 init_db()
 
-# --- Vulnerable Route 1: SQL Injection ---
+# --- Vulnerable Route 1: SQL Injectgion ---
 @app.route('/user')
 def get_user():
     username = request.args.get('username')
@@ -55,3 +55,4 @@ def ping_host():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
