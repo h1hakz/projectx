@@ -38,7 +38,7 @@ jobs:
       # It uses the curated default ruleset "p/default" instead of a local file.
       - name: Run Semgrep
         run: |
-          semgrep scan --config "p/default" --sarif --output semgrep.sarif --error
+          semgrep scan --config .semgrep.yml --sarif --output semgrep.sarif --error
 
       - name: Upload SARIF
         if: always()
