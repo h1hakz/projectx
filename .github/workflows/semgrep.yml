@@ -1,36 +1,40 @@
-name: Semgrep
+name: semgrep-scan
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
-    branches: [ main ]        # optional: scan main on push
-  workflow_dispatch: {}      # optional: run on demand
+    branches:
+      - main
 
 jobs:
   semgrep:
-    name: semgrep
+    name: Semgrep scan
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full fetch helps diff-aware behavior if needed
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.11'
 
       - name: Install Semgrep
-        run: python -m pip install --upgrade pip && pip install semgrep
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep
 
-      - name: Run Semgrep (CI-safe)
-        # --error makes `semgrep scan` exit 1 when findings exist (so job fails).
-        run: semgrep scan --config auto --sarif --output semgrep.sarif --error
+      # This is the step that needs to be fixed
+      - name: Run Semgrep
+        run: |
+          semgrep scan --config .semgrep.yml --sarif --output semgrep.sarif --error --all-targets
 
-      - name: Upload SARIF to GitHub Code Scanning (optional, nice UI)
-        uses: github/codeql-action/upload-sarif@v2
+      - name: Upload SARIF
+        # This step runs even if the previous one fails to aid in debugging
+        if: always() 
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
