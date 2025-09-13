@@ -1,4 +1,6 @@
-name: semgrep-scan
+# File: .github/workflows/semgrep.yml
+
+name: Semgrep Scan
 
 on:
   pull_request:
@@ -9,8 +11,13 @@ on:
 
 jobs:
   semgrep:
-    name: Semgrep scan
+    name: Semgrep Scan
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
+      
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,14 +34,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install semgrep
 
-      # This is the step that needs to be fixed
+      # This is the only step that is different from Option 1.
+      # It uses the curated default ruleset "p/default" instead of a local file.
       - name: Run Semgrep
         run: |
-          semgrep scan --config .semgrep.yml --sarif --output semgrep.sarif --error --all-targets
+          semgrep scan --config "p/default" --sarif --output semgrep.sarif --error
 
       - name: Upload SARIF
-        # This step runs even if the previous one fails to aid in debugging
-        if: always() 
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
