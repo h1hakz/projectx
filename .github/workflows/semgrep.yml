@@ -36,9 +36,9 @@ jobs:
 
       # This is the only step that is different from Option 1.
       # It uses the curated default ruleset "p/default" instead of a local file.
-      - name: Run Semgrep
+      - name: Run Semgrep (Verbose)
         run: |
-          semgrep scan --config .semgrep.yml --sarif --output semgrep.sarif --error
+          semgrep scan --config .semgrep.yml --verbose --sarif --output semgrep.sarif --error
 
       - name: Upload SARIF
         if: always()
