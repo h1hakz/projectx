@@ -1,58 +1,40 @@
-from flask import Flask, request, escape
-import sqlite3
-import subprocess
+import os
+import pickle
 import hashlib
 
-app = Flask(__name__)
+# --- Hardcoded API key ---
+API_KEY = "12345-very-secret-key"  # ❌ Hardcoded secret
 
-# --- Hardcoded secret (should be flagged) ---
-app.config['SECRET_KEY'] = 'this-is-a-hardcoded-secret'
+# --- Weak hashing example ---
+def hash_password(password):
+    # ❌ MD5 is insecure
+    return hashlib.md5(password.encode()).hexdigest()
 
-# --- Database Setup ---
-def init_db():
-    conn = sqlite3.connect('example.db')
-    c = conn.cursor()
-    c.execute('DROP TABLE IF EXISTS users')
-    c.execute('''
-        CREATE TABLE users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL
-        )
-    ''')
-    # Weak hash example
-    hashed_pass = hashlib.md5("password123".encode()).hexdigest()
-    c.execute("INSERT INTO users (username, password) VALUES (?, ?)", ('admin', hashed_pass))
-    conn.commit()
-    conn.close()
+# --- Insecure file handling (Path Traversal) ---
+def read_user_file(filename):
+    # ❌ No sanitization, can read arbitrary files
+    with open(f"/tmp/{filename}", "r") as f:
+        return f.read()
 
-init_db()
+# --- Insecure deserialization ---
+def load_data(file_path):
+    # ❌ Untrusted pickle load
+    with open(file_path, "rb") as f:
+        data = pickle.load(f)
+    return data
 
-# --- Vulnerable Route 1: SQL Injectgion ---
-@app.route('/user')
-def get_user():
-    username = request.args.get('username')
-    conn = sqlite3.connect('example.db')
-    c = conn.cursor()
+# Example usage
+if __name__ == "__main__":
+    print("Hashed password:", hash_password("mypassword"))
 
-    # ❌ Vulnerable: f-string directly into SQL
-    query = f"SELECT username FROM users WHERE username = '{username}'"
-    c.execute(query)
-    user = c.fetchone()
-    conn.close()
+    # Reading user-controlled file (Path Traversal)
+    try:
+        print(read_user_file("../../etc/passwd"))
+    except Exception as e:
+        print("Error:", e)
 
-    if user:
-        return f"<h1>User Found: {escape(user[0])}</h1>"
-    return "<h1>User not found.</h1>", 404
-
-# --- Vulnerable Route 2: Command Injection ---
-@app.route('/ping')
-def ping_host():
-    host = request.args.get('host')
-
-    # ❌ Vulnerable: subprocess with shell=True
-    result = subprocess.check_output(f"ping -c 1 {host}", shell=True)
-    return f"<pre>{escape(result.decode())}</pre>"
-
-if __name__ == '__main__':
-    app.run(debug=True)
-
+    # Loading pickle (potential code execution)
+    try:
+        load_data("user_data.pkl")
+    except Exception as e:
+        print("Error:", e)
