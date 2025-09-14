@@ -1,17 +1,45 @@
-name: "Auto request reviewers on PR"
+name: "Auto request reviewers (no external action)"
+
 on:
   pull_request:
     types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
 
 jobs:
   request-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Request reviewers
-        uses: peter-evans/request-review@v2
+      - name: Request reviewers using github-script
+        uses: actions/github-script@v6
         with:
-          # single or comma-separated usernames
-          reviewers: "h1hakz,h2hakz"
-          # or teams: team_reviewers: "your-org/frontend-team"
-          # optional: add a message to the review request
-          message: "Hi — please review this PR when you get a chance."
+          script: |
+            // Configure reviewer list here
+            const reviewersPool = ["h1hakz","h2hakz"];
+
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.info("No pull_request payload; exiting.");
+              return;
+            }
+
+            const author = pr.user.login;
+            // Filter out PR author (and optionally bots)
+            const pool = reviewersPool.filter(r => r !== author && !r.endsWith("[bot]"));
+
+            if (pool.length === 0) {
+              core.info("No eligible reviewers after filtering PR author.");
+              return;
+            }
+
+            // Request all eligible reviewers. Replace with random pick if desired.
+            await github.rest.pulls.requestReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              reviewers: pool
+            });
+
+            core.info(`Requested reviewers: ${pool.join(", ")}`);
