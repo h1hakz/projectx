@@ -1,4 +1,4 @@
-name: "Auto request reviewers (no external action)"
+name: "Auto request reviewers"
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ jobs:
   request-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Assigning Reviwers
+      - name: Assigning Reviewer
         uses: actions/github-script@v6
         with:
           script: |
