@@ -1,0 +1,6 @@
+# .github/CODEOWNERS
+
+# This is a catch-all rule. All pull requests will require a review
+
+# Any changes to workflow files must be reviewed
+.github/workflows/   @h1hakz
