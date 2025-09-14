@@ -17,7 +17,7 @@ jobs:
         with:
           script: |
             // Configure reviewer list here
-            const reviewersPool = ["h1hakz","h2hakz"];
+            const reviewersPool = ["h1hakz","h2hakz","cysmanojkumar"];
 
             const pr = context.payload.pull_request;
             if (!pr) {
