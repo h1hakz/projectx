@@ -12,7 +12,7 @@ jobs:
   request-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Request reviewers using github-script
+      - name: Assigning Reviwers
         uses: actions/github-script@v6
         with:
           script: |
