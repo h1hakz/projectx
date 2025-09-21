@@ -62,8 +62,11 @@ jobs:
           sudo apt-get install -y trivy
 
       # 5️⃣ Run Trivy vulnerability scan
-      - name: Run Trivy scanner
-        if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
-        run: |
-          trivy image --severity CRITICAL,HIGH --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
+      - name: Run Trivy vulnerability scanner
+        run: trivy image --format sarif --output trivy-results.sarif my-app:latest
+      
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: trivy-results.sarif
 
