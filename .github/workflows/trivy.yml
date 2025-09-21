@@ -52,6 +52,7 @@ jobs:
 
       # 4️⃣ Install Trivy CLI
       - name: Install Trivy
+        if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y wget
