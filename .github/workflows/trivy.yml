@@ -62,6 +62,13 @@ jobs:
         run: |
           trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --format table --exit-code 0 --vuln-type os,library my-app:${{ github.sha }} > trivy-report.txt
           
+      - name: Read Trivy report
+        id: trivy_report
+        run: |
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          cat trivy-report.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
       # 8️⃣ Post Trivy scan results as PR comment
       - name: Post Trivy scan results as PR comment
         if: github.event_name == 'pull_request'
@@ -72,5 +79,5 @@ jobs:
           body: |
             **Trivy Security Scan Results**
             ```
-            $(cat trivy-report.txt)
+            ${{ steps.trivy_report.outputs.content }}
             ```
