@@ -1,18 +1,12 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
 name: trivy
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
-    # The branches below must be a subset of the branches above
     branches: [ "main" ]
   schedule:
-    - cron: '25 1 * * 2'
+    - cron: '40 5 * * 2'  # Every Tuesday at 05:40 UTC
 
 permissions:
   contents: read
@@ -20,29 +14,56 @@ permissions:
 jobs:
   build:
     permissions:
-      contents: read # for actions/checkout to fetch code
-      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
-      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
-    name: Build
+      contents: read
+      security-events: write
+      actions: read
+    name: Build and Scan Docker Image
     runs-on: ubuntu-latest
+
     steps:
+      # 1️⃣ Checkout repository
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build an image from Dockerfile
+      # 2️⃣ Find Dockerfile automatically
+      - name: Find Dockerfile
+        id: find_dockerfile
         run: |
-          docker build -t docker.io/my-organization/my-app:${{ github.sha }} .
+          FILE=$(find . -type f -name 'Dockerfile' | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "dockerfile_found=false" >> $GITHUB_OUTPUT
+            echo "No Dockerfile found, skipping build and scan."
+          else
+            DIR=$(dirname "$FILE")
+            echo "dockerfile_found=true" >> $GITHUB_OUTPUT
+            echo "dockerfile=$FILE" >> $GITHUB_OUTPUT
+            echo "context=$DIR" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
-        with:
-          image-ref: 'docker.io/my-organization/my-app:${{ github.sha }}'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+      # 3️⃣ Build Docker image
+      - name: Build Docker image
+        if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
+        run: |
+          echo "Building Docker image from ${{ steps.find_dockerfile.outputs.dockerfile }} ..."
+          docker build \
+            -t my-app:${{ github.sha }} \
+            -f "${{ steps.find_dockerfile.outputs.dockerfile }}" \
+            "${{ steps.find_dockerfile.outputs.context }}"
 
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
+      # 4️⃣ Install Trivy CLI
+      - name: Install Trivy
+        if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      # 5️⃣ Run Trivy vulnerability scan
+      - name: Run Trivy scanner
+        if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
+        run: |
+          trivy image --severity CRITICAL,HIGH --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
+
