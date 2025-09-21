@@ -1,13 +1,10 @@
-# vulnerable Dockerfile for Trivy testing
-FROM ubuntu:16.04
+# Use an old, known-vulnerable base image
+FROM ubuntu:18.04
 
-# Install outdated packages with known vulnerabilities
-RUN apt-get update && \
-    apt-get install -y \
-    curl=7.47.0-1ubuntu2.19 \
-    openssl=1.0.2g-1ubuntu4.20 \
-    sudo=1.8.16-0ubuntu1.10 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install a specific vulnerable version of a package, for example, curl
+# This version of curl has multiple known vulnerabilities.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl=7.58.0-2ubuntu3.8 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Add a dummy app
-RUN echo "This is a vulnerable test image" > /app.txt
+CMD ["bash"]
