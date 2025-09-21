@@ -20,36 +20,44 @@ jobs:
     name: Build and Scan Docker Image
     runs-on: ubuntu-latest
 
-    env:
-      IMAGE_NAME: my-app  # Local image name
-      DOCKERFILE_PATH: docker/Dockerfile  # <-- Change this if your Dockerfile is elsewhere
-      BUILD_CONTEXT: docker  # <-- Folder containing your Dockerfile
-
     steps:
       # 1️⃣ Checkout repository
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Build Docker image
+      # 2️⃣ Find Dockerfile automatically
+      - name: Find Dockerfile
+        id: find_dockerfile
+        run: |
+          FILE=$(find . -type f -name 'Dockerfile' | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "No Dockerfile found!"
+            exit 1
+          fi
+          DIR=$(dirname "$FILE")
+          echo "dockerfile=$FILE" >> $GITHUB_OUTPUT
+          echo "context=$DIR" >> $GITHUB_OUTPUT
+
+      # 3️⃣ Build Docker image
       - name: Build Docker image
         run: |
-          echo "Building Docker image..."
+          echo "Building Docker image from ${{ steps.find_dockerfile.outputs.dockerfile }} ..."
           docker build \
-            -t $IMAGE_NAME:${{ github.sha }} \
-            -f $DOCKERFILE_PATH \
-            $BUILD_CONTEXT
+            -t my-app:${{ github.sha }} \
+            -f "${{ steps.find_dockerfile.outputs.dockerfile }}" \
+            "${{ steps.find_dockerfile.outputs.context }}"
 
-      # 3️⃣ Run Trivy vulnerability scan
+      # 4️⃣ Run Trivy vulnerability scan
       - name: Run Trivy scanner
         uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
         with:
-          image-ref: '${{ env.IMAGE_NAME }}:${{ github.sha }}'
+          image-ref: 'my-app:${{ github.sha }}'
           format: 'template'
           template: '@/contrib/sarif.tpl'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
 
-      # 4️⃣ Upload SARIF results to GitHub Security tab
+      # 5️⃣ Upload SARIF results to GitHub Security tab
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v3
         with:
