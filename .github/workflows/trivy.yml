@@ -29,15 +29,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build an image from Dockerfile
+      - name: Build Docker image
         run: docker build -t my-app:${{ github.sha }} .
-        # run: |
-          # docker build -t docker.io/my-organization/my-app:${{ github.sha }} .
-
+      
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
         with:
-          image-ref: 'docker.io/my-organization/my-app:${{ github.sha }}'
+          image-ref: 'my-app:${{ github.sha }}'
           format: 'template'
           template: '@/contrib/sarif.tpl'
           output: 'trivy-results.sarif'
