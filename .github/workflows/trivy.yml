@@ -57,27 +57,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      # 5️⃣ Run Trivy vulnerability scan (detailed output to file)
+      # 5️⃣ Run Trivy vulnerability scan (detailed output to console)
       - name: Run Trivy scanner (detailed)
         run: |
-          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --format table --exit-code 0 --vuln-type os,library my-app:${{ github.sha }} > trivy-report.txt
-          
-      - name: Read Trivy report
-        id: trivy_report
-        run: |
-          echo "content<<EOF" >> $GITHUB_OUTPUT
-          head -n 100 trivy-report.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
-      # 8️⃣ Post Trivy scan results as PR comment
-      - name: Post Trivy scan results as PR comment
-        if: github.event_name == 'pull_request'
-        uses: peter-evans/create-or-update-comment@v4
+          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
+
+      # 6️⃣ Run Trivy vulnerability scan (SARIF for GitHub Security tab)
+      - name: Run Trivy scanner (SARIF)
+        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            **Trivy Security Scan Results**
-            ```
-            ${{ steps.trivy_report.outputs.content }}
-            ```
+          image-ref: 'my-app:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      # 7️⃣ Upload SARIF results to GitHub Security tab
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
