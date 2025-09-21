@@ -1,28 +1,25 @@
-name: trivy
+name: Trivy PR Scan and Block
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
-  schedule:
-    - cron: '25 1 * * 2'
+    branches: ["main"]
+  push:
+    branches: ["main"]
 
 permissions:
   contents: read
+  pull-requests: write
+  security-events: write
 
 jobs:
   trivy-scan:
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
     runs-on: ubuntu-latest
     steps:
+      # 1️⃣ Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Check if Dockerfile exists
+      # 2️⃣ Check if Dockerfile exists in repo root
       - name: Check for Dockerfile
         id: check_dockerfile
         run: |
@@ -32,23 +29,38 @@ jobs:
             echo "found=false" >> $GITHUB_ENV
           fi
 
+      # 3️⃣ Build Docker image
       - name: Build Docker image
         if: env.found == 'true'
         run: |
-          docker build -t docker.io/my-organization/my-app:${{ github.sha }} .
+          docker build -t my-app:${{ github.sha }} .
 
+      # 4️⃣ Run Trivy scan on the image
       - name: Run Trivy vulnerability scanner
         if: env.found == 'true'
-        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
+        uses: aquasecurity/trivy-action@v0.28.0
+        id: trivy_scan
         with:
-          image-ref: 'docker.io/my-organization/my-app:${{ github.sha }}'
+          image-ref: 'my-app:${{ github.sha }}'
           format: 'template'
           template: '@/contrib/sarif.tpl'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'  # 🔴 Fail workflow if CRITICAL/HIGH vulns found
 
-      - name: Upload Trivy scan results to GitHub Security tab
+      # 5️⃣ Upload SARIF to Security tab
+      - name: Upload Trivy SARIF results
         if: env.found == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
+
+      # 6️⃣ Post human-readable results as a PR comment
+      - name: Post Trivy results as PR comment
+        if: env.found == 'true'
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: trivy-results.sarif
+          header: "🔒 Trivy Scan Results"
