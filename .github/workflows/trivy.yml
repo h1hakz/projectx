@@ -1,66 +1,48 @@
-name: Trivy PR Scan and Block
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: trivy
 
 on:
-  pull_request:
-    branches: ["main"]
   push:
-    branches: ["main"]
+    branches: [ "main" ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ "main" ]
+  schedule:
+    - cron: '40 5 * * 2'
 
 permissions:
   contents: read
-  pull-requests: write
-  security-events: write
 
 jobs:
-  trivy-scan:
+  build:
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+    name: Build
     runs-on: ubuntu-latest
     steps:
-      # 1️⃣ Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Check if Dockerfile exists in repo root
-      - name: Check for Dockerfile
-        id: check_dockerfile
+      - name: Build an image from Dockerfile
         run: |
-          if [ -f ./Dockerfile ]; then
-            echo "found=true" >> $GITHUB_ENV
-          else
-            echo "found=false" >> $GITHUB_ENV
-          fi
+          docker build -t docker.io/my-organization/my-app:${{ github.sha }} .
 
-      # 3️⃣ Build Docker image
-      - name: Build Docker image
-        if: env.found == 'true'
-        run: |
-          docker build -t my-app:${{ github.sha }} .
-
-      # 4️⃣ Run Trivy scan on the image
       - name: Run Trivy vulnerability scanner
-        if: env.found == 'true'
-        uses: aquasecurity/trivy-action@v0.28.0
-        id: trivy_scan
+        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
         with:
-          image-ref: 'my-app:${{ github.sha }}'
+          image-ref: 'docker.io/my-organization/my-app:${{ github.sha }}'
           format: 'template'
           template: '@/contrib/sarif.tpl'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
-          exit-code: '1'  # 🔴 Fail workflow if CRITICAL/HIGH vulns found
 
-      # 5️⃣ Upload SARIF to Security tab
-      - name: Upload Trivy SARIF results
-        if: env.found == 'true'
+      - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
-
-      # 6️⃣ Post human-readable results as a PR comment
-      - name: Post Trivy results as PR comment
-        if: env.found == 'true'
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          path: trivy-results.sarif
-          header: "🔒 Trivy Scan Results"
