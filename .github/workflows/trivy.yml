@@ -57,10 +57,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      # 5️⃣ Run Trivy vulnerability scan (detailed output to console)
+      # 5️⃣ Run Trivy vulnerability scan (detailed output to file)
       - name: Run Trivy scanner (detailed)
         run: |
-          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
+          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --format table --exit-code 0 --vuln-type os,library my-app:${{ github.sha }} > trivy-report.txt
 
       # 6️⃣ Run Trivy vulnerability scan (SARIF for GitHub Security tab)
       - name: Run Trivy scanner (SARIF)
@@ -77,3 +77,16 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
+          
+      # 8️⃣ Post Trivy scan results as PR comment
+      - name: Post Trivy scan results as PR comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            **Trivy Security Scan Results**
+            ```
+            $(cat trivy-report.txt)
+            ```
