@@ -38,7 +38,7 @@ jobs:
           echo "dockerfile=$FILE" >> $GITHUB_OUTPUT
           echo "context=$DIR" >> $GITHUB_OUTPUT
 
-           # 3️⃣ Build Docker image
+      # 3️⃣ Build Docker image
       - name: Build Docker image
         run: |
           echo "Building Docker image from ${{ steps.find_dockerfile.outputs.dockerfile }} ..."
@@ -47,13 +47,23 @@ jobs:
             -f "${{ steps.find_dockerfile.outputs.dockerfile }}" \
             "${{ steps.find_dockerfile.outputs.context }}"
 
-      # 4️⃣ Run Trivy vulnerability scan (detailed output to console)
+      # 4️⃣ Install Trivy CLI
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      # 5️⃣ Run Trivy vulnerability scan (detailed output to console)
       - name: Run Trivy scanner (detailed)
         run: |
           trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
 
-      # 5️⃣ Run Trivy vulnerability scan (SARIF for GitHub Security tab)
-      - name: Run Trivy scanner
+      # 6️⃣ Run Trivy vulnerability scan (SARIF for GitHub Security tab)
+      - name: Run Trivy scanner (SARIF)
         uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
         with:
           image-ref: 'my-app:${{ github.sha }}'
@@ -61,3 +71,9 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           exit-code: '1'
+
+      # 7️⃣ Upload SARIF results to GitHub Security tab
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
