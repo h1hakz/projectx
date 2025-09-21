@@ -1,24 +1,13 @@
-# Vulnerable Dockerfile example for Trivy demo
-
-# 1. Use an outdated, vulnerable base image
+# vulnerable Dockerfile for Trivy testing
 FROM ubuntu:16.04
 
-# 2. Install packages with known CVEs and without version pinning
+# Install outdated packages with known vulnerabilities
 RUN apt-get update && \
     apt-get install -y \
-    openssl \
-    apache2 \
-    libssl1.0.0 \
-    wget \
-    curl \
-    vim \
-    && rm -rf /var/lib/apt/lists/*
+    curl=7.47.0-1ubuntu2.19 \
+    openssl=1.0.2g-1ubuntu4.20 \
+    sudo=1.8.16-0ubuntu1.10 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 3. Run as root (bad practice)
-USER root
-
-# 4. Expose port
-EXPOSE 8080
-
-# 5. Start apache2 in foreground
-CMD ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
+# Add a dummy app
+RUN echo "This is a vulnerable test image" > /app.txt
