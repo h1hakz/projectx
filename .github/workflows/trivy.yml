@@ -61,8 +61,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      # 5️⃣ Run Trivy vulnerability scan (detailed output to console)
-      - name: Run Trivy scanner (detailed)
+      # 5️⃣ Run Trivy vulnerability scan
+      - name: Run Trivy scanner
         if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
         run: |
           trivy image --severity CRITICAL,HIGH --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
