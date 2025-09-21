@@ -18,7 +18,7 @@ RUN apt-get update && \
 USER root
 
 # 4. Expose port
-EXPOSE 80
+EXPOSE 8080
 
 # 5. Start apache2 in foreground
 CMD ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
