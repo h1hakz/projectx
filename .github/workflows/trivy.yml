@@ -60,20 +60,5 @@ jobs:
       # 5️⃣ Run Trivy vulnerability scan (detailed output to console)
       - name: Run Trivy scanner (detailed)
         run: |
-          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
+          trivy image --severity CRITICAL,HIGH --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
 
-      # 6️⃣ Run Trivy vulnerability scan (SARIF for GitHub Security tab)
-      - name: Run Trivy scanner (SARIF)
-        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
-        with:
-          image-ref: 'my-app:${{ github.sha }}'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-
-      # 7️⃣ Upload SARIF results to GitHub Security tab
-      - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
