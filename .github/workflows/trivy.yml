@@ -54,7 +54,7 @@ jobs:
           image-ref: 'my-app:${{ github.sha }}'
           format: 'sarif'
           output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW,INFO'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           exit-code: '1'
 
       # 5️⃣ Upload SARIF results to GitHub Security tab
