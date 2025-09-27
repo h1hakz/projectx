@@ -22,22 +22,20 @@ jobs:
 
       # Console output
       - name: tfsec console output
-        uses: aquasecurity/tfsec-action@v1.0.3
+        uses: aquasecurity/tfsec-action@v2
         with:
-          version: latest
+          version: v1.28.1   # Pin tfsec version for reliability
           format: default
       
       # SARIF for GitHub Security
       - name: tfsec SARIF output
-        uses: aquasecurity/tfsec-action@v1.0.3
+        uses: aquasecurity/tfsec-action@v2
         with:
-          version: latest
+          version: v1.28.1   # Pin tfsec version for reliability
           format: sarif
           additional_args: --out tfsec.sarif
-
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: tfsec.sarif
-
