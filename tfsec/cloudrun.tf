@@ -1,57 +1,32 @@
-terraform {
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-  }
+# vulnerable.tf
+
+provider "aws" {
+  region = "us-east-1"
 }
 
-provider "google" {
-  project = "my-insecure-project"
-  region  = "us-central1"
+# ❌ Public S3 bucket (insecure ACL + no encryption)
+resource "aws_s3_bucket" "vulnerable_bucket" {
+  bucket = "my-vulnerable-tfsec-test-bucket"
+  acl    = "public-read"   # tfsec should flag this
 }
 
-# 🚨 Vulnerable Cloud Run Service
-resource "google_cloud_run_service" "public_service" {
-  name     = "vulnerable-service"
-  location = "us-central1"
+# ❌ Security group wide open to the world
+resource "aws_security_group" "insecure_sg" {
+  name        = "insecure-sg"
+  description = "Allow all inbound traffic"
+  vpc_id      = "vpc-123456"
 
-  template {
-    spec {
-      containers {
-        image = "gcr.io/google-containers/busybox"   # 🚨 outdated/unscanned public image
-
-        # 🚨 Running as root, no securityContext restrictions
-        command = ["sh", "-c", "while true; do nc -l -p 80 -e /bin/sh; done"]
-
-        resources {
-          limits = {
-            memory = "512Mi"
-            cpu    = "1"
-          }
-        }
-
-        env {
-          name  = "DB_PASSWORD"
-          value = "SuperSecret123"   # 🚨 Hardcoded secret in environment
-        }
-      }
-    }
+  ingress {
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]   # tfsec should flag this
   }
 
-  traffic {
-    percent         = 100
-    latest_revision = true
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
-}
-
-# 🚨 IAM Binding that makes service PUBLICLY accessible
-resource "google_cloud_run_service_iam_binding" "public_access" {
-  location = google_cloud_run_service.public_service.location
-  service  = google_cloud_run_service.public_service.name
-  role     = "roles/run.invoker"
-  members  = [
-    "allUsers"    # 🚨 Anyone on the internet can invoke
-  ]
 }
