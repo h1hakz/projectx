@@ -20,13 +20,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Console output
       - name: tfsec console output
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          version: v1.28.1   # Pin to a stable tfsec version
+          version: v1.28.1
           format: default
-      
+
       - name: tfsec SARIF output
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
