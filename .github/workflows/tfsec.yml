@@ -24,8 +24,8 @@ jobs:
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
           version: latest
-          format: sarif
-          additional_args: --out tfsec.sarif --severity=CRITICAL
+          format: default
+          additional_args: --severity=CRITICAL
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
