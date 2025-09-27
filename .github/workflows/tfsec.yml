@@ -23,13 +23,13 @@ jobs:
       - name: tfsec console output
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          version: v1.28.6
+          version: v1.28.5
           format: default
 
       - name: tfsec SARIF output
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          version: v1.28.6
+          version: v1.28.5
           format: sarif
           additional_args: --out tfsec.sarif
 
