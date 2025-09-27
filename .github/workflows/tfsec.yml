@@ -10,7 +10,6 @@ on:
 
 jobs:
   tfsec:
-    name: Run tfsec sarif report
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -18,16 +17,18 @@ jobs:
       security-events: write
 
     steps:
-      - name: Clone repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Run tfsec
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
           version: latest
-          args: --format sarif --out tfsec.sarif
+          format: sarif
+          additional_args: --out tfsec.sarif
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: tfsec.sarif
+
