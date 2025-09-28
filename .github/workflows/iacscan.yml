@@ -49,7 +49,7 @@ jobs:
         id: count_criticals
         run: |
           # Ensure this path matches the output from the step above
-          SARIF_FILE_PATH="results.sarif"
+          SARIF_FILE_PATH="results_sarif.sarif"
           
           if [ ! -f "$SARIF_FILE_PATH" ]; then
             echo "Error: SARIF file not found at $SARIF_FILE_PATH"
@@ -68,7 +68,7 @@ jobs:
           script: |
             const fs = require('fs');
             // Ensure this path matches the output from the 'List Contents' step
-            const sarifPath = 'results.sarif';
+            const sarifPath = 'results_sarif.sarif';
             
             if (!fs.existsSync(sarifPath)) {
               github.rest.issues.createComment({
