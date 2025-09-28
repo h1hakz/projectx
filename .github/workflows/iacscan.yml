@@ -15,48 +15,50 @@ jobs:
   checkov-scan:
     name: Scan IaC and Comment on PR
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Find Terraform Directory
         id: find_tf_dir
+        # ... (Your existing find command) ...
         run: |
-          # Find the first directory containing .tf files, excluding .terraform and .github folders
           TF_DIR=$(find . -type f -name "*.tf" -not -path "*/.terraform/*" -not -path "./.github/*" -printf '%h\n' | sort -u | head -n 1)
-          
-          if [ -z "$TF_DIR" ]; then
-            echo "No Terraform (*.tf) files found to scan."
-            echo "tf_directory=" >> $GITHUB_OUTPUT
-          else
-            echo "Terraform files found in: $TF_DIR"
-            echo "tf_directory=$TF_DIR" >> $GITHUB_OUTPUT
-          fi
+          if [ -z "$TF_DIR" ]; then echo "tf_directory=" >> $GITHUB_OUTPUT; else echo "tf_directory=$TF_DIR" >> $GITHUB_OUTPUT; fi
 
       - name: Run Checkov Scan
-        # This step only runs if a Terraform directory was found
         if: steps.find_tf_dir.outputs.tf_directory != ''
         id: checkov
         uses: bridgecrewio/checkov-action@v12
         with:
           directory: ${{ steps.find_tf_dir.outputs.tf_directory }}
           framework: terraform
-          # Don't fail the job here; we'll fail it later based on severity
           soft_fail: true
-          # Output results to a SARIF file for processing
           output_format: sarif
           output_file_path: "results.sarif"
-          
+
+      # --- ADD THESE DEBUGGING STEPS ---
+      - name: 🔎 Verify SARIF file was created
+        if: steps.find_tf_dir.outputs.tf_directory != ''
+        run: ls -l
+
+      - name: 📄 View SARIF file content
+        if: steps.find_tf_dir.outputs.tf_directory != ''
+        run: |
+          echo "--- Start of results.sarif ---"
+          cat results.sarif | head -n 10
+          echo "--- End of preview ---"
+      # --- END OF DEBUGGING STEPS ---
+
       - name: Count Critical Issues
-        # This step only runs if the Checkov scan was successful
         if: steps.checkov.outcome == 'success'
         id: count_criticals
         run: |
-          # Use 'jq' to parse the SARIF file and count results with level "error" (maps to Critical/High)
           CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' results.sarif)
           echo "Found $CRITICAL_COUNT critical issues."
           echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+
+      # ... (Rest of your steps for commenting and failing) ...
 
       - name: Post PR Comment
         # This step also only runs if the Checkov scan was successful
