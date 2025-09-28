@@ -33,21 +33,26 @@ jobs:
       - run: pip install checkov gh-cli
         if: steps.find_tf_dir.outputs.tf_directory != ''
 
-      # --- NEW SINGLE SCRIPT STEP ---
+      # --- FINAL ROBUST SCRIPT STEP ---
       - name: Run Scan, Process Results, and Comment
         if: steps.find_tf_dir.outputs.tf_directory != ''
         run: |
-          # Run checkov and store the SARIF JSON output in a variable
-          # The pipe '|' sends the output of checkov directly to the 'tee' and 'jq' commands
-          SCAN_OUTPUT=$(checkov -d ${{ steps.find_tf_dir.outputs.tf_directory }} --framework terraform --soft-fail --quiet --output sarif)
+          # Use checkov's native file output flag '-o' to create a clean SARIF file
+          checkov -d ${{ steps.find_tf_dir.outputs.tf_directory }} --framework terraform --soft-fail --quiet --output sarif -o results.sarif
 
-          # Count critical issues from the variable
-          CRITICAL_COUNT=$(echo "$SCAN_OUTPUT" | jq '[.runs[].results[] | select(.level == "error")] | length')
+          # Verify the file was created before proceeding
+          if [ ! -f "results.sarif" ]; then
+            echo "Error: Checkov failed to create the results.sarif file."
+            exit 1
+          fi
+
+          # Count critical issues by reading from the file
+          CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' results.sarif)
           echo "Found $CRITICAL_COUNT critical issues."
 
           # Build the main body of the PR comment
           COMMENT_BODY="### 🛡️ Checkov IaC Scan Results\n\n"
-          TOTAL_ISSUES=$(echo "$SCAN_OUTPUT" | jq '[.runs[].results[]] | length')
+          TOTAL_ISSUES=$(jq '[.runs[].results[]] | length' results.sarif)
 
           if [ "$TOTAL_ISSUES" -eq 0 ]; then
             COMMENT_BODY+="✅ No security or misconfiguration issues found."
@@ -59,8 +64,8 @@ jobs:
 
             if [ "$CRITICAL_COUNT" -gt 0 ]; then
               COMMENT_BODY+="#### 🚨 Critical Issues to Address:\n"
-              # Use jq to format the critical issues into a markdown list
-              CRITICAL_DETAILS=$(echo "$SCAN_OUTPUT" | jq -r '.runs[].results[] | select(.level == "error") | "- **\(.ruleId)**: \(.message.text) (in `\(.locations[0].physicalLocation.artifactLocation.uri)` on line **\(.locations[0].physicalLocation.region.startLine)**)\n"')
+              # Use jq to format the critical issues into a markdown list directly from the file
+              CRITICAL_DETAILS=$(jq -r '.runs[].results[] | select(.level == "error") | "- **\(.ruleId)**: \(.message.text) (in `\(.locations[0].physicalLocation.artifactLocation.uri)` on line **\(.locations[0].physicalLocation.region.startLine)**)\n"' results.sarif)
               COMMENT_BODY+="$CRITICAL_DETAILS"
             else
               COMMENT_BODY+="✅ No critical issues found."
