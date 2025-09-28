@@ -20,14 +20,15 @@ jobs:
 
       - name: Run Checkov
         id: checkov
-        # Use a more recent version of the action
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: ./
+          # Be specific about what you want to scan
+          directory: ./terraform  # CHANGE THIS to your IaC directory
+          framework: terraform    # ADD THIS line to specify the framework
+          
           soft_fail: true
-          # Specify both format and file path
           output_format: sarif
-          output_file_path: "results.sarif" # Using a simple name
+          output_file_path: "results.sarif"
           
       # --- DEBUGGING STEPS (You can remove these later) ---
       - name: 🔎 Verify SARIF file was created
