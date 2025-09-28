@@ -1,2 +1,2 @@
-FROM node:22-alpine
+FROM node:10
 CMD ["bash"]
