@@ -1,79 +1,101 @@
-name: IaC Scan and PR Comment
+name: IaC Scan with Checkov
 
+# This workflow runs on pull requests targeting the main branch
 on:
   pull_request:
     branches:
       - main
 
+# These permissions are required for the action to read code and post PR comments
 permissions:
-  contents: read      # To checkout the code
-  pull-requests: write # To post comments on the PR
+  contents: read
+  pull-requests: write
 
 jobs:
   checkov-scan:
-    name: Scan IaC with Checkov
+    name: Scan IaC and Comment on PR
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run Checkov
+      - name: Find Terraform Directory
+        id: find_tf_dir
+        run: |
+          # Find the first directory containing .tf files, excluding .terraform and .github folders
+          TF_DIR=$(find . -type f -name "*.tf" -not -path "*/.terraform/*" -not -path "./.github/*" -printf '%h\n' | sort -u | head -n 1)
+          
+          if [ -z "$TF_DIR" ]; then
+            echo "No Terraform (*.tf) files found to scan."
+            echo "tf_directory=" >> $GITHUB_OUTPUT
+          else
+            echo "Terraform files found in: $TF_DIR"
+            echo "tf_directory=$TF_DIR" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Checkov Scan
+        # This step only runs if a Terraform directory was found
+        if: steps.find_tf_dir.outputs.tf_directory != ''
         id: checkov
         uses: bridgecrewio/checkov-action@v12
         with:
-          # Be specific about what you want to scan
-          directory: ./terraform  # CHANGE THIS to your IaC directory
-          framework: terraform    # ADD THIS line to specify the framework
-          
+          directory: ${{ steps.find_tf_dir.outputs.tf_directory }}
+          framework: terraform
+          # Don't fail the job here; we'll fail it later based on severity
           soft_fail: true
+          # Output results to a SARIF file for processing
           output_format: sarif
           output_file_path: "results.sarif"
           
-      # --- DEBUGGING STEPS (You can remove these later) ---
-      - name: 🔎 Verify SARIF file was created
-        run: |
-          echo "Listing files in the workspace..."
-          ls -l
-          
-      - name: 📄 View SARIF file content
-        run: |
-          echo "Displaying the first 10 lines of the results file..."
-          cat results.sarif | head -n 10
-      # --- END DEBUGGING STEPS ---
-
       - name: Count Critical Issues
+        # This step only runs if the Checkov scan was successful
+        if: steps.checkov.outcome == 'success'
         id: count_criticals
         run: |
-          # Ensure you use the same filename as in the checkov step
+          # Use 'jq' to parse the SARIF file and count results with level "error" (maps to Critical/High)
           CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' results.sarif)
           echo "Found $CRITICAL_COUNT critical issues."
           echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
 
       - name: Post PR Comment
-        # This step depends on the SARIF file being correct
-        if: always() # Run this step even if previous steps fail
+        # This step also only runs if the Checkov scan was successful
+        if: steps.checkov.outcome == 'success'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            // Use the same filename here
-            const sarifPath = 'results.sarif';
+            const sarif = JSON.parse(fs.readFileSync('results.sarif', 'utf8'));
+            const results = sarif.runs[0].results;
             
             let commentBody = `### 🛡️ Checkov IaC Scan Results\n\n`;
             
-            if (!fs.existsSync(sarifPath)) {
-              commentBody += '❌ **Error:** SARIF results file not found.';
+            if (results.length === 0) {
+              commentBody += '✅ No security or misconfiguration issues found.';
             } else {
-              const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8'));
-              // Your script to parse and format the comment...
-              // (The rest of your script from the previous example goes here)
-              const results = sarif.runs[0].results;
               const criticals = results.filter(r => r.level === 'error');
-              commentBody += `**Summary:** Found ${results.length} total issues, including **${criticals.length} Critical/High**.\n\n`;
+              const others = results.filter(r => r.level !== 'error');
+              
+              commentBody += `**Summary:** Found ${results.length} total issues.\n`;
+              commentBody += `- **${criticals.length} Critical/High**\n`;
+              commentBody += `- **${others.length} Medium/Low**\n\n`;
+              
+              // List critical issues if any exist
+              if (criticals.length > 0) {
+                commentBody += `#### 🚨 Critical Issues to Address:\n`;
+                for (const result of criticals) {
+                  const ruleId = result.ruleId;
+                  const location = result.locations[0].physicalLocation.artifactLocation.uri;
+                  const line = result.locations[0].physicalLocation.region.startLine;
+                  commentBody += `- **${ruleId}**: ${result.message.text} (in \`${location}\` on line **${line}**)\n`;
+                }
+              } else {
+                commentBody += '✅ No critical issues found.';
+              }
             }
             
+            // Post the formatted comment to the Pull Request
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -82,7 +104,13 @@ jobs:
             });
 
       - name: Fail on Critical Issues
+        # This step fails the workflow if the count of critical issues is greater than 0
         if: steps.count_criticals.outputs.critical_count > 0
         run: |
           echo "Failing the workflow because critical issues were found."
           exit 1
+          
+      - name: Notify Scan Skipped
+        # This step only runs if no Terraform directory was found in the first place
+        if: steps.find_tf_dir.outputs.tf_directory == ''
+        run: echo "Skipping Checkov scan because no Terraform files were found."
