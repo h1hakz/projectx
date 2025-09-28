@@ -46,8 +46,8 @@ jobs:
       - name: Count Critical Issues
         if: steps.checkov.outcome == 'success'
         id: count_criticals
-         run: |
-          # Use the filename you found in the previous step
+        run: |
+          # Ensure this path matches the output from the step above
           SARIF_FILE_PATH="results.sarif/terraform.sarif"
           
           if [ ! -f "$SARIF_FILE_PATH" ]; then
@@ -66,11 +66,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            // Use the filename you found in the previous step
+            // Ensure this path matches the output from the 'List Contents' step
             const sarifPath = 'results.sarif/terraform.sarif';
             
             if (!fs.existsSync(sarifPath)) {
-              // Handle case where file doesn't exist
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
@@ -81,7 +80,6 @@ jobs:
             }
 
             const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8'));
-            // ... (The rest of your comment script remains the same)
             const results = sarif.runs[0].results;
             let commentBody = `### 🛡️ Checkov IaC Scan Results\n\n`;
             if (results.length === 0) {
@@ -111,16 +109,12 @@ jobs:
               body: commentBody
             });
 
-      # ... (The rest of your steps for failing and skipping)
-
       - name: Fail on Critical Issues
-        # This step fails the workflow if the count of critical issues is greater than 0
         if: steps.count_criticals.outputs.critical_count > 0
         run: |
           echo "Failing the workflow because critical issues were found."
           exit 1
           
       - name: Notify Scan Skipped
-        # This step only runs if no Terraform directory was found in the first place
         if: steps.find_tf_dir.outputs.tf_directory == ''
         run: echo "Skipping Checkov scan because no Terraform files were found."
