@@ -3,7 +3,7 @@ name: IaC Scan and PR Comment
 on:
   pull_request:
     branches:
-      - main # Or your default branch
+      - main
 
 permissions:
   contents: read      # To checkout the code
@@ -20,58 +20,59 @@ jobs:
 
       - name: Run Checkov
         id: checkov
-        uses: bridgecrewio/checkov-action@v12
+        # Use a more recent version of the action
+        uses: bridgecrewio/checkov-action@v13
         with:
-          # Scan the entire repository
           directory: ./
-          # Do not fail the step here, as we want to comment first. We will fail it later.
           soft_fail: true
-          # Output results in SARIF format for easier processing
+          # Specify both format and file path
           output_format: sarif
-          output_file_path: "checkov_results.sarif"
+          output_file_path: "results.sarif" # Using a simple name
           
+      # --- DEBUGGING STEPS (You can remove these later) ---
+      - name: 🔎 Verify SARIF file was created
+        run: |
+          echo "Listing files in the workspace..."
+          ls -l
+          
+      - name: 📄 View SARIF file content
+        run: |
+          echo "Displaying the first 10 lines of the results file..."
+          cat results.sarif | head -n 10
+      # --- END DEBUGGING STEPS ---
+
       - name: Count Critical Issues
         id: count_criticals
         run: |
-          # Use 'jq' to parse the SARIF file and count results with level "error" (which maps to Critical/High)
-          CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' checkov_results.sarif)
+          # Ensure you use the same filename as in the checkov step
+          CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' results.sarif)
           echo "Found $CRITICAL_COUNT critical issues."
           echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
 
       - name: Post PR Comment
+        # This step depends on the SARIF file being correct
+        if: always() # Run this step even if previous steps fail
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const sarif = JSON.parse(fs.readFileSync('checkov_results.sarif', 'utf8'));
-            const results = sarif.runs[0].results;
+            // Use the same filename here
+            const sarifPath = 'results.sarif';
             
             let commentBody = `### 🛡️ Checkov IaC Scan Results\n\n`;
             
-            if (results.length === 0) {
-              commentBody += '✅ No issues found.';
+            if (!fs.existsSync(sarifPath)) {
+              commentBody += '❌ **Error:** SARIF results file not found.';
             } else {
+              const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8'));
+              // Your script to parse and format the comment...
+              // (The rest of your script from the previous example goes here)
+              const results = sarif.runs[0].results;
               const criticals = results.filter(r => r.level === 'error');
-              const others = results.filter(r => r.level !== 'error');
-              
-              commentBody += `**Summary:** Found ${results.length} total issues.\n`;
-              commentBody += `- **${criticals.length} Critical/High**\n`;
-              commentBody += `- **${others.length} Medium/Low**\n\n`;
-              
-              // List critical issues
-              if (criticals.length > 0) {
-                commentBody += `#### 🚨 Critical Issues to Fix:\n`;
-                for (const result of criticals) {
-                  const ruleId = result.ruleId;
-                  const location = result.locations[0].physicalLocation.artifactLocation.uri;
-                  const line = result.locations[0].physicalLocation.region.startLine;
-                  commentBody += `- **${ruleId}**: ${result.message.text} (in \`${location}\` on line ${line})\n`;
-                }
-              }
+              commentBody += `**Summary:** Found ${results.length} total issues, including **${criticals.length} Critical/High**.\n\n`;
             }
             
-            // Post the comment to the PR
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -82,5 +83,5 @@ jobs:
       - name: Fail on Critical Issues
         if: steps.count_criticals.outputs.critical_count > 0
         run: |
-          echo "Failing the workflow because ${CRITICAL_COUNT} critical issues were found."
+          echo "Failing the workflow because critical issues were found."
           exit 1
