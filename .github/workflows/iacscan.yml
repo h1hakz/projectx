@@ -37,14 +37,19 @@ jobs:
           # This will now be treated as the output directory
           output_file_path: "results.sarif"
 
+      - name: 🕵️ List Contents of Results Directory
+        if: steps.checkov.outcome == 'success'
+        run: |
+          echo "Listing files inside the 'results.sarif' directory:"
+          ls -l results.sarif
+
       - name: Count Critical Issues
         if: steps.checkov.outcome == 'success'
         id: count_criticals
-        run: |
-          # CHANGE: Point to the actual file inside the directory
-          SARIF_FILE_PATH="results.sarif/results.sarif"
+         run: |
+          # Use the filename you found in the previous step
+          SARIF_FILE_PATH="results.sarif/terraform.sarif"
           
-          # Check if the file exists before counting
           if [ ! -f "$SARIF_FILE_PATH" ]; then
             echo "Error: SARIF file not found at $SARIF_FILE_PATH"
             exit 1
@@ -61,8 +66,8 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            // CHANGE: Point to the actual file inside the directory
-            const sarifPath = 'results.sarif/results.sarif';
+            // Use the filename you found in the previous step
+            const sarifPath = 'results.sarif/terraform.sarif';
             
             if (!fs.existsSync(sarifPath)) {
               // Handle case where file doesn't exist
