@@ -33,15 +33,16 @@ jobs:
           directory: ${{ steps.find_tf_dir.outputs.tf_directory }}
           framework: terraform
           soft_fail: true
-          # The action will create the SARIF file and provide its path as an output
           output_format: sarif
+          # ADDED: Explicitly name the output file
+          output_file_path: "results.sarif"
       
       - name: Count Critical Issues
         if: steps.checkov.outcome == 'success'
         id: count_criticals
         run: |
-          # CORRECTED: Use the official output from the Checkov action to get the file path
-          SARIF_FILE_PATH="${{ steps.checkov.outputs.checkov_results_sarif_file }}"
+          # CHANGED: Use the predictable, hardcoded filename
+          SARIF_FILE_PATH="results.sarif"
 
           CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' "$SARIF_FILE_PATH")
           echo "Found $CRITICAL_COUNT critical issues."
@@ -54,8 +55,8 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            // CORRECTED: Use the official output from the Checkov action to get the file path
-            const sarifPath = '${{ steps.checkov.outputs.checkov_results_sarif_file }}';
+            // CHANGED: Use the predictable, hardcoded filename
+            const sarifPath = 'results.sarif';
             
             const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8'));
             const results = sarif.runs[0].results;
