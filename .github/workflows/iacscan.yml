@@ -6,14 +6,14 @@ on:
     branches:
       - main
 
-# These permissions are required for the action to read code and post PR comments
+# Permissions are required to read code and write PR comments
 permissions:
   contents: read
   pull-requests: write
 
 jobs:
   checkov-scan:
-    name: Scan IaC and Comment on PR
+    name: Scan, Process, and Comment
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -25,74 +25,58 @@ jobs:
           TF_DIR=$(find . -type f -name "*.tf" -not -path "*/.terraform/*" -not -path "./.github/*" -printf '%h\n' | sort -u | head -n 1)
           if [ -z "$TF_DIR" ]; then echo "tf_directory=" >> $GITHUB_OUTPUT; else echo "tf_directory=$TF_DIR" >> $GITHUB_OUTPUT; fi
 
-      - name: Run Checkov Scan
+      - name: Setup Python and Install Checkov
         if: steps.find_tf_dir.outputs.tf_directory != ''
-        id: checkov
-        uses: bridgecrewio/checkov-action@v12
+        uses: actions/setup-python@v5
         with:
-          directory: ${{ steps.find_tf_dir.outputs.tf_directory }}
-          framework: terraform
-          soft_fail: true
-          output_format: sarif
-          # ADDED: Explicitly name the output file
-          output_file_path: "results.sarif"
-      
-      - name: Count Critical Issues
-        if: steps.checkov.outcome == 'success'
-        id: count_criticals
-        run: |
-          # CHANGED: Use the predictable, hardcoded filename
-          SARIF_FILE_PATH="results.sarif"
+          python-version: '3.9'
+      - run: pip install checkov gh-cli
+        if: steps.find_tf_dir.outputs.tf_directory != ''
 
-          CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' "$SARIF_FILE_PATH")
+      # --- NEW SINGLE SCRIPT STEP ---
+      - name: Run Scan, Process Results, and Comment
+        if: steps.find_tf_dir.outputs.tf_directory != ''
+        run: |
+          # Run checkov and store the SARIF JSON output in a variable
+          # The pipe '|' sends the output of checkov directly to the 'tee' and 'jq' commands
+          SCAN_OUTPUT=$(checkov -d ${{ steps.find_tf_dir.outputs.tf_directory }} --framework terraform --soft-fail --quiet --output sarif)
+
+          # Count critical issues from the variable
+          CRITICAL_COUNT=$(echo "$SCAN_OUTPUT" | jq '[.runs[].results[] | select(.level == "error")] | length')
           echo "Found $CRITICAL_COUNT critical issues."
-          echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
 
-      - name: Post PR Comment
-        if: steps.checkov.outcome == 'success'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            // CHANGED: Use the predictable, hardcoded filename
-            const sarifPath = 'results.sarif';
-            
-            const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8'));
-            const results = sarif.runs[0].results;
-            let commentBody = `### 🛡️ Checkov IaC Scan Results\n\n`;
-            if (results.length === 0) {
-              commentBody += '✅ No security or misconfiguration issues found.';
-            } else {
-              const criticals = results.filter(r => r.level === 'error');
-              const others = results.filter(r => r.level !== 'error');
-              commentBody += `**Summary:** Found ${results.length} total issues.\n`;
-              commentBody += `- **${criticals.length} Critical/High**\n`;
-              commentBody += `- **${others.length} Medium/Low**\n\n`;
-              if (criticals.length > 0) {
-                commentBody += `#### 🚨 Critical Issues to Address:\n`;
-                for (const result of criticals) {
-                  const ruleId = result.ruleId;
-                  const location = result.locations[0].physicalLocation.artifactLocation.uri;
-                  const line = result.locations[0].physicalLocation.region.startLine;
-                  commentBody += `- **${ruleId}**: ${result.message.text} (in \`${location}\` on line **${line}**)\n`;
-                }
-              } else {
-                commentBody += '✅ No critical issues found.';
-              }
-            }
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
+          # Build the main body of the PR comment
+          COMMENT_BODY="### 🛡️ Checkov IaC Scan Results\n\n"
+          TOTAL_ISSUES=$(echo "$SCAN_OUTPUT" | jq '[.runs[].results[]] | length')
 
-      - name: Fail on Critical Issues
-        if: steps.count_criticals.outputs.critical_count > 0
-        run: |
-          echo "Failing the workflow because critical issues were found."
-          exit 1
+          if [ "$TOTAL_ISSUES" -eq 0 ]; then
+            COMMENT_BODY+="✅ No security or misconfiguration issues found."
+          else
+            OTHERS_COUNT=$((TOTAL_ISSUES - CRITICAL_COUNT))
+            COMMENT_BODY+="**Summary:** Found $TOTAL_ISSUES total issues.\n"
+            COMMENT_BODY+="- **$CRITICAL_COUNT Critical/High**\n"
+            COMMENT_BODY+="- **$OTHERS_COUNT Medium/Low**\n\n"
+
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              COMMENT_BODY+="#### 🚨 Critical Issues to Address:\n"
+              # Use jq to format the critical issues into a markdown list
+              CRITICAL_DETAILS=$(echo "$SCAN_OUTPUT" | jq -r '.runs[].results[] | select(.level == "error") | "- **\(.ruleId)**: \(.message.text) (in `\(.locations[0].physicalLocation.artifactLocation.uri)` on line **\(.locations[0].physicalLocation.region.startLine)**)\n"')
+              COMMENT_BODY+="$CRITICAL_DETAILS"
+            else
+              COMMENT_BODY+="✅ No critical issues found."
+            fi
+          fi
+
+          # Post the comment to the PR using the GitHub CLI
+          gh pr comment ${{ github.event.pull_request.number }} --body "$COMMENT_BODY"
+
+          # Finally, fail the step if critical issues were found
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "Failing the workflow because critical issues were found."
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Notify Scan Skipped
         if: steps.find_tf_dir.outputs.tf_directory == ''
