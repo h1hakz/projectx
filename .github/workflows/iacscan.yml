@@ -25,7 +25,6 @@ jobs:
           TF_DIR=$(find . -type f -name "*.tf" -not -path "*/.terraform/*" -not -path "./.github/*" -printf '%h\n' | sort -u | head -n 1)
           if [ -z "$TF_DIR" ]; then echo "tf_directory=" >> $GITHUB_OUTPUT; else echo "tf_directory=$TF_DIR" >> $GITHUB_OUTPUT; fi
 
-      # --- NEW STEP: Install Checkov Manually ---
       - name: Setup Python and Install Checkov
         if: steps.find_tf_dir.outputs.tf_directory != ''
         uses: actions/setup-python@v5
@@ -34,19 +33,17 @@ jobs:
       - run: pip install checkov
         if: steps.find_tf_dir.outputs.tf_directory != ''
 
-      # --- CHANGED STEP: Run Checkov Command Directly ---
       - name: Run Checkov Scan
         if: steps.find_tf_dir.outputs.tf_directory != ''
         id: checkov
         run: |
-          # The '>' character redirects the SARIF output directly into a file
-          checkov -d ${{ steps.find_tf_dir.outputs.tf_directory }} --framework terraform --soft-fail --output sarif > results.sarif
+          # The --quiet flag suppresses extra logs, ensuring a clean SARIF output
+          checkov -d ${{ steps.find_tf_dir.outputs.tf_directory }} --framework terraform --soft-fail --quiet --output sarif > results.sarif
       
       - name: Count Critical Issues
         if: steps.checkov.outcome == 'success'
         id: count_criticals
         run: |
-          # This will now correctly find the results.sarif file in the root
           SARIF_FILE_PATH="results.sarif"
           CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' "$SARIF_FILE_PATH")
           echo "Found $CRITICAL_COUNT critical issues."
@@ -59,7 +56,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            // This will now correctly find the file
             const sarifPath = 'results.sarif';
             
             const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8'));
