@@ -33,12 +33,12 @@ jobs:
       - run: pip install checkov gh-cli
         if: steps.find_tf_dir.outputs.tf_directory != ''
 
-      # --- FINAL ROBUST SCRIPT STEP ---
+      # --- FINAL CORRECTED SCRIPT STEP ---
       - name: Run Scan, Process Results, and Comment
         if: steps.find_tf_dir.outputs.tf_directory != ''
         run: |
-          # Use checkov's native file output flag '-o' to create a clean SARIF file
-          checkov -d ${{ steps.find_tf_dir.outputs.tf_directory }} --framework terraform --soft-fail --quiet --output sarif -o results.sarif
+          # CORRECTED: Use --output-file-path to specify the filename
+          checkov -d ${{ steps.find_tf_dir.outputs.tf_directory }} --framework terraform --soft-fail --quiet --output sarif --output-file-path results.sarif
 
           # Verify the file was created before proceeding
           if [ ! -f "results.sarif" ]; then
