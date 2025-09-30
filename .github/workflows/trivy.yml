@@ -3,7 +3,7 @@ name: trivy
 on:
   push:
     branches: [ "main" ]
-  pull_request:
+  pull_request_target:
     branches: [ "main" ]
   schedule:
     - cron: '40 5 * * 2'  # Every Tuesday at 05:40 UTC
