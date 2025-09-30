@@ -17,7 +17,7 @@ jobs:
       contents: read
       security-events: write
       actions: read
-    name: Build and Scan Docker Image
+    name: Build and Scan
     runs-on: ubuntu-latest
 
     steps:
@@ -52,7 +52,6 @@ jobs:
 
       # 4️⃣ Install Trivy CLI
       - name: Install Trivy
-        if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y wget
@@ -61,9 +60,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      # 5️⃣ Run Trivy vulnerability scan
-      - name: Run Trivy scanner
+      # 5️⃣ Run Trivy vulnerability scan on Docker image
+      - name: Run Trivy scanner (Image)
         if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
         run: |
-          trivy image --severity CRITICAL,HIGH --format table --exit-code 1 --vuln-type os,library my-app:${{ github.sha }}
+          trivy image --severity CRITICAL,HIGH \
+            --format table \
+            --exit-code 1 \
+            --vuln-type os,library \
+            my-app:${{ github.sha }}
 
+      # 6️⃣ Run Trivy IaC scan (Terraform)
+      - name: Run Trivy scanner (Terraform IaC)
+        run: |
+          trivy config --severity CRITICAL,HIGH \
+            --format table \
+            --exit-code 1 \
+            .
