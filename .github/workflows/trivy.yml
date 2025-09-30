@@ -3,14 +3,13 @@ name: trivy
 on:
   push:
     branches: [ "main" ]
-  pull_request_target:
+  pull_request:
     branches: [ "main" ]
   schedule:
     - cron: '40 5 * * 2'  # Every Tuesday at 05:40 UTC
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   build:
@@ -33,6 +32,7 @@ jobs:
           FILE=$(find . -type f -name 'Dockerfile' | head -n 1)
           if [ -z "$FILE" ]; then
             echo "dockerfile_found=false" >> $GITHUB_OUTPUT
+            echo "No Dockerfile found, skipping build and scan."
           else
             DIR=$(dirname "$FILE")
             echo "dockerfile_found=true" >> $GITHUB_OUTPUT
@@ -54,68 +54,26 @@ jobs:
       - name: Install Trivy
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget jq
+          sudo apt-get install -y wget
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
           echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      # 5️⃣ Run Trivy vulnerability scan (Docker)
+      # 5️⃣ Run Trivy vulnerability scan on Docker image
       - name: Run Trivy scanner (Image)
         if: steps.find_dockerfile.outputs.dockerfile_found == 'true'
-        id: image_scan
         run: |
-          trivy image --severity CRITICAL,HIGH --format json --vuln-type os,library my-app:${{ github.sha }} > trivy-image.json || true
+          trivy image --severity CRITICAL,HIGH \
+            --format table \
+            --exit-code 1 \
+            --vuln-type os,library \
+            my-app:${{ github.sha }}
 
-          count=$(jq '.Results[].Vulnerabilities | length' trivy-image.json 2>/dev/null | awk '{s+=$1} END {print s+0}')
-          if [ "$count" -gt 0 ]; then
-            summary="$count issues"
-            details=$(jq -r '.Results[].Vulnerabilities[] | "\(.VulnerabilityID) - \(.PkgName)@\(.InstalledVersion)"' trivy-image.json | head -5)
-          else
-            summary="No issues"
-            details=""
-          fi
-          echo "summary=$summary" >> $GITHUB_OUTPUT
-          echo "details<<EOF" >> $GITHUB_OUTPUT
-          echo "$details" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      # 6️⃣ Run Trivy Terraform scan
+      # 6️⃣ Run Trivy IaC scan (Terraform)
       - name: Run Trivy scanner (Terraform IaC)
-        id: tf_scan
         run: |
-          trivy config --severity CRITICAL,HIGH --format json . > trivy-tf.json || true
-
-          count=$(jq '.Results[].Misconfigurations | length' trivy-tf.json 2>/dev/null | awk '{s+=$1} END {print s+0}')
-          if [ "$count" -gt 0 ]; then
-            summary="$count issues"
-            details=$(jq -r '.Results[].Misconfigurations[] | "\(.ID) - \(.Message)"' trivy-tf.json | head -5)
-          else
-            summary="No issues"
-            details=""
-          fi
-          echo "summary=$summary" >> $GITHUB_OUTPUT
-          echo "details<<EOF" >> $GITHUB_OUTPUT
-          echo "$details" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      # 7️⃣ Comment concise results on PR
-      - name: Comment results
-        if: github.event_name == 'pull_request'
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            🛡️ **Trivy Scan Results**
-
-            **Docker Image**
-            - Summary: **${{ steps.image_scan.outputs.summary }}**
-            ```
-            ${{ steps.image_scan.outputs.details }}
-            ```
-
-            **Terraform IaC**
-            - Summary: **${{ steps.tf_scan.outputs.summary }}**
-            ```
-            ${{ steps.tf_scan.outputs.details }}
-            ```
+          trivy config --severity CRITICAL,HIGH \
+            --format table \
+            --exit-code 1 \
+            .
