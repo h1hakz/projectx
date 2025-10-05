@@ -27,7 +27,7 @@ def init_db():
 
 init_db()
 
-# --- Vulnerable Route 1: SQL Injection ---
+# --- Vulnerable Route 1: SQL Injection fff---
 @app.route('/user')
 def get_user():
     username = request.args.get('username')
