@@ -1,4 +1,3 @@
-# ssrf_secure.py
 # Safer version of the SSRF example
 # Blocks requests to private IP ranges, loopback, and enforces an allowlist.
 

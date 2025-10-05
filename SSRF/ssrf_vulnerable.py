@@ -1,4 +1,3 @@
-# ssrf.py
 # Deliberately vulnerable SSRF example (educational use only)
 
 from flask import Flask, request
