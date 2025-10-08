@@ -2,9 +2,9 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "h1hakz-patch-12" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "h1hakz-patch-12" ]
 
 jobs:
   analyze:
@@ -20,18 +20,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # --- NEW DEBUGGING STEP ---
-    # This will print the file structure to the action's log,
-    # so you can confirm the config file path is correct.
-    - name: Verify file structure
-      run: ls -R .github
-
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
-        # Simplified to only scan python
         languages: python
-        # This path MUST exactly match the location of your file
         config-file: ./.github/codeql/codeql-config.yml
 
     - name: Perform CodeQL Analysis
