@@ -27,10 +27,9 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          # languages you want to analyze
-          languages: javascript, python, cpp
-          # path to your CodeQL config file (repo-root-relative)
+          languages: python, javascript
           config-file: .github/codeql/exclusion-config.yml
+
 
       # If you need a build step for compiled languages, add it here.
       # For Python/JS (interpreted) usually not required, but specific projects may need it.
@@ -41,5 +40,3 @@ jobs:
           upload: true
           # optional: increase threads/ram if you want faster analysis
           threads: 2
-          # optional: include snippets in results to get context
-          add-snippets: true
