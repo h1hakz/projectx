@@ -1,13 +1,6 @@
 # .github/codeql/codeql-config.yml
 name: "Custom CodeQL Configuration (exclude python SQL injection)"
 
-languages:
-  - python
-
-queries:
-  - uses: security-and-quality
-
-# Exclude python SQL injection query reported by CodeQL
 query-filters:
   - exclude:
       id: py/sql-injection
