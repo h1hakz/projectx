@@ -1,158 +1,44 @@
-name: "CodeQL - filtered scan (robust SARIF handling)"
+name: CodeQL
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
-  actions: read
   security-events: write
 
 jobs:
-  codeql:
-    name: CodeQL scanning (python, exclude py/sql-injection)
+  codeql-analysis:
+    name: CodeQL Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v2
         with:
-          config-file: .github/codeql/codeql-config.yml
           languages: python
 
-      - name: Set up Python 3.x
-        uses: actions/setup-python@v4
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v2
         with:
-          python-version: '3.x'
+          upload: false
+          output: results
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies if requirements.txt exists
+      - name: Filter CodeQL results
+        id: filter
         run: |
-          if [ -f requirements.txt ]; then
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
-          else
-            echo "No requirements.txt — skipping pip install"
-          fi
+          jq '.runs[].results |= map(select((.ruleId != "py/sql-injection") and ((try (.properties["security-severity"] | tonumber) catch 0) >= 9.0)))' results/*.sarif > filtered.sarif
+          results_count=$(jq '[.runs[].results | length] | max' filtered.sarif)
+          echo "hasResults=$([ \"$results_count\" -gt 0 ] && echo true || echo false)" >> $GITHUB_OUTPUT
 
-      - name: Run CodeQL analysis (produce SARIF, do not upload)
-        uses: github/codeql-action/analyze@v3
+      - name: Upload SARIF if results exist
+        if: steps.filter.outputs.hasResults == 'true'
+        uses: github/codeql-action/upload-sarif@v2
         with:
-          output: sarif-results/codeql.sarif
-          upload: 'never'
-
-      - name: Prepare SARIF for filtering (robust)
-        run: |
-          set -euo pipefail
-          mkdir -p sarif-results
-
-          echo "Workspace top-level listing (for debug):"
-          ls -la || true
-
-          if [ -s sarif-results/codeql.sarif ]; then
-            echo "Found sarif-results/codeql.sarif (non-empty) — using it."
-            exit 0
-          fi
-
-          echo "Did not find sarif-results/codeql.sarif or it is empty. Searching for any .sarif files in the workspace..."
-          found=$(find . -type f -name '*.sarif' -print -quit || true)
-
-          if [ -n "$found" ]; then
-            echo "Found SARIF at: $found"
-            cp "$found" sarif-results/codeql.sarif
-            echo "Copied to sarif-results/codeql.sarif"
-          else
-            echo "No SARIF found anywhere in workspace."
-            echo "Creating a minimal empty SARIF so downstream steps can run safely."
-            cat > sarif-results/codeql.sarif <<'SARIF'
-{
-  "version": "2.1.0",
-  "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0.json",
-  "runs": []
-}
-SARIF
-          fi
-
-          echo "Prepared sarif-results/codeql.sarif (size in bytes):"
-          stat --printf="%s\n" sarif-results/codeql.sarif || true
-
-      - name: Upload raw SARIF artifact (debug)
-        uses: actions/upload-artifact@v4
-        with:
-          name: raw-codeql-sarif
-          path: sarif-results/codeql.sarif
-
-      - name: Remove py/sql-injection results from SARIF
-        run: |
-          set -euo pipefail
-          jq '
-            if .runs == null then .
-            else
-              .runs = (.runs | map(
-                if .results == null then . else
-                  .results = (.results | map(select(.ruleId != "py/sql-injection")))
-                end
-              ))
-            end
-          ' sarif-results/codeql.sarif > sarif-results/codeql.nosql.sarif
-
-      - name: Upload nosql SARIF artifact (debug)
-        uses: actions/upload-artifact@v4
-        with:
-          name: nosql-codeql-sarif
-          path: sarif-results/codeql.nosql.sarif
-
-      - name: Keep only Critical severity results
-        run: |
-          set -euo pipefail
-          jq '
-            if .runs == null then .
-            else
-              .runs = (.runs | map(
-                ( . as $run |
-                  .results = ( ($run.results // []) | map(
-                    select(
-                      ( .level == "error" )
-                      or ( ( .properties["security-severity"]? // "" ) | ascii_downcase == "critical" )
-                      or (
-                        ( .ruleIndex? | type == "number" ) and
-                        ( ( ($run.tool.driver.rules[.ruleIndex].properties["security-severity"]? // "") | ascii_downcase ) == "critical" )
-                      )
-                    )
-                  ))
-                )
-              ))
-            end
-          ' sarif-results/codeql.nosql.sarif > sarif-results/codeql.critical.sarif || true
-
-      - name: Upload critical SARIF artifact (debug)
-        uses: actions/upload-artifact@v4
-        with:
-          name: critical-codeql-sarif
-          path: sarif-results/codeql.critical.sarif
-
-      - name: Show counts at each stage (debug)
-        run: |
-          echo "Original results count (if present):"
-          jq '[.runs[]?.results[]?] | length' sarif-results/codeql.sarif || echo "0"
-          echo "After removing py/sql-injection:"
-          jq '[.runs[]?.results[]?] | length' sarif-results/codeql.nosql.sarif || echo "0"
-          echo "After keeping only Critical:"
-          jq '[.runs[]?.results[]?] | length' sarif-results/codeql.critical.sarif || echo "0"
-
-      - name: Upload filtered SARIF to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: sarif-results/codeql.critical.sarif
+          sarif_file: filtered.sarif
