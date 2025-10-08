@@ -1,13 +1,16 @@
 # .github/codeql/codeql-config.yml
 name: "Custom CodeQL Configuration (exclude and include)"
 
-paths-ignore:
-  exclude:
-    - "tests/"
-    - "docs/"
+paths-ignore: [
+  "tests/**",
+  "migrations/**",
+  "docs/**"
+]
 
   query-filters:
 #   - exclude:
 #       id: py/flask-debug
     - include:
-        severities: [critical, high]
+        problem.severity:
+          - critical
+          - high
