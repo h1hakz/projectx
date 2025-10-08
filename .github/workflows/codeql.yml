@@ -1,95 +1,154 @@
 # .github/workflows/codeql-analysis.yml
-name: "CodeQL - custom filtering (exclude py/sql-injection, Critical only)"
+name: "CodeQL - filtered scan (no autobuild)"
 
 on:
   push:
   pull_request:
 
 permissions:
-  actions: read
   contents: read
-  security-events: write   # required to upload SARIF
+  actions: read
+  security-events: write
 
 jobs:
   codeql:
-    name: CodeQL Scan (filtered)
+    name: CodeQL scanning (python, exclude py/sql-injection)
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
+      # Initialize CodeQL using the config file that excludes py/sql-injection
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          # Use the config file that excludes py/sql-injection
           config-file: .github/codeql/codeql-config.yml
-          # Specify languages scanned by your repo; adjust as needed.
-          # For a Python-only repo use: python
-          # For multi-language repos list them comma-separated: "javascript,python,java"
           languages: python
 
-      - name: Autobuild (optional; required for some languages)
-        uses: github/codeql-action/autobuild@v3
-        # If your repo does not require a build step for CodeQL, you can remove/skip this step.
+      # -----------------------
+      # Custom "build" / setup for Python
+      # -----------------------
+      # Replace the autobuild action with explicit commands for your repo.
+      # For Python this usually means installing dependencies and (optionally) running tests.
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
 
-      - name: Run CodeQL analysis (produce SARIF, do not upload yet)
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies if requirements.txt exists
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt, skipping pip install"
+          fi
+
+      # (Optional) Run your project's tests (uncomment / adapt if you have tests)
+      # - name: Run tests
+      #   run: |
+      #     pytest -q || true
+
+      # -----------------------
+      # Run CodeQL analysis (write SARIF locally — do NOT upload yet)
+      # -----------------------
+      - name: Run CodeQL analysis (produce SARIF, do not upload)
         uses: github/codeql-action/analyze@v3
         with:
           output: sarif-results/codeql.sarif
           upload: 'never'
 
-      - name: Ensure sarif-results exists
+      - name: Ensure sarif-results directory exists
         run: mkdir -p sarif-results
 
+      # Upload raw SARIF as an artifact (optional, helpful for debugging)
+      - name: Upload raw SARIF (artifact, for debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-codeql-sarif
+          path: sarif-results/codeql.sarif
+
+      # -----------------------
+      # Remove py/sql-injection results from SARIF (defensive)
+      # -----------------------
       - name: Remove py/sql-injection results from SARIF
-        # This jq expression removes any result with ruleId == "py/sql-injection"
         run: |
           if [ ! -f sarif-results/codeql.sarif ]; then
             echo "SARIF not found: sarif-results/codeql.sarif"
             exit 1
           fi
-          jq '(.runs[]? |= ( .results = ( (.results // []) | map(select(.ruleId != "py/sql-injection")) ) ))' \
-            sarif-results/codeql.sarif > sarif-results/codeql.nosql.sarif
 
+          # Defensive jq: handle cases where runs or results may be missing.
+          jq '
+            if .runs == null then .
+            else
+              .runs = (.runs | map(
+                if .results == null then . else
+                  .results = (.results | map(select(.ruleId != "py/sql-injection")))
+                end
+              ))
+            end
+          ' sarif-results/codeql.sarif > sarif-results/codeql.nosql.sarif
+
+      - name: Upload nosql SARIF (artifact, for debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nosql-codeql-sarif
+          path: sarif-results/codeql.nosql.sarif
+
+      # -----------------------
+      # Keep only Critical severity results
+      # -----------------------
       - name: Keep only Critical severity results
-        # This jq is defensive: it checks common SARIF locations for severity information.
         run: |
           jq '
-            # For each run, replace .results with only those that should be kept
-            .runs = (.runs | map(
-              ( . as $run |
-                .results = ( ($run.results // []) | map(
-                  select(
-                    # keep if SARIF "level" is "error"
-                    ( .level == "error" )
-                    or
-                    # or the result has properties.security-severity == "critical"
-                    ( ( .properties["security-severity"]? // "" ) | ascii_downcase == "critical" )
-                    or
-                    # or the rule referenced by ruleIndex has properties.security-severity == "critical"
-                    (
-                      ( .ruleIndex? | type == "number" ) and
-                      (
-                        ( ($run.tool.driver.rules[.ruleIndex].properties["security-severity"]? // "") | ascii_downcase ) == "critical"
+            if .runs == null then .
+            else
+              .runs = (.runs | map(
+                ( . as $run |
+                  .results = ( ($run.results // []) | map(
+                    select(
+                      ( .level == "error" )
+                      or ( ( .properties["security-severity"]? // "" ) | ascii_downcase == "critical" )
+                      or (
+                        ( .ruleIndex? | type == "number" ) and
+                        ( ( ($run.tool.driver.rules[.ruleIndex].properties["security-severity"]? // "") | ascii_downcase ) == "critical" )
                       )
                     )
-                  )
-                ))
-              )
-            ))
+                  ))
+                )
+              ))
+            end
           ' sarif-results/codeql.nosql.sarif > sarif-results/codeql.critical.sarif
 
-      - name: (optional) Show counts of results at each stage for debugging
-        run: |
-          echo "Original total results:"
-          jq '[.runs[]?.results[]? | .ruleId] | length' sarif-results/codeql.sarif || true
-          echo "After removing py/sql-injection:"
-          jq '[.runs[]?.results[]? | .ruleId] | length' sarif-results/codeql.nosql.sarif || true
-          echo "After keeping only Critical:"
-          jq '[.runs[]?.results[]? | .ruleId] | length' sarif-results/codeql.critical.sarif || true
+      - name: Upload critical SARIF (artifact, for debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: critical-codeql-sarif
+          path: sarif-results/codeql.critical.sarif
 
+      - name: Show counts at each stage (debug)
+        run: |
+          echo "Original results count:"
+          jq '[.runs[]?.results[]?] | length' sarif-results/codeql.sarif || echo "0"
+          echo "After removing py/sql-injection:"
+          jq '[.runs[]?.results[]?] | length' sarif-results/codeql.nosql.sarif || echo "0"
+          echo "After keeping only Critical:"
+          jq '[.runs[]?.results[]?] | length' sarif-results/codeql.critical.sarif || echo "0"
+
+      # -----------------------
+      # Upload final filtered SARIF to GitHub code scanning
+      # -----------------------
       - name: Upload filtered SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
         with:
