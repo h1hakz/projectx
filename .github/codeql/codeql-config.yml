@@ -1,4 +1,3 @@
-# .github/codeql/codeql-config.yml
 name: "Custom CodeQL Configuration (exclude and include)"
 
 paths-ignore: [
