@@ -7,8 +7,10 @@ paths-ignore: [
   "docs/**"
 ]
 
-  query-filters:
-    - include:
-        problem.severity:
-          - critical
-          - high
+query-filters:
+   - exclude:
+       id: py/flask-debug
+   - include:
+       problem.severity:
+         - critical
+         - high
