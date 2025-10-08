@@ -8,11 +8,10 @@ on:
 
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze Python Code
     runs-on: ubuntu-latest
     permissions:
       security-events: write
-      packages: read
       actions: read
       contents: read
     
@@ -20,11 +19,17 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    # This step is for debugging. It will list all files to make sure 
+    # the config file exists where we expect it to.
+    - name: Verify file structure
+      run: ls -R
+
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
         languages: python
-        config-file: .github/codeql/codeql-config.yml
+        # This path MUST match the location of the file below.
+        config-file: ./.github/codeql/codeql-config.yml
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
