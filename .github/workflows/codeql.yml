@@ -1,4 +1,3 @@
-# A more efficient workflow that scans multiple languages in a single job.
 name: "CodeQL"
 
 on:
@@ -11,7 +10,6 @@ on:
 
 jobs:
   analyze:
-    # The job name is now static since we are not using a matrix.
     name: Analyze
     runs-on: ubuntu-latest
     permissions:
@@ -20,25 +18,17 @@ jobs:
       actions: read
       contents: read
 
-    # The entire 'strategy' block has been removed.
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        # Pass all languages as a comma-separated string.
-        languages: actions, python
-        # 'build-mode' is not needed here, as 'none' is the default
-        # for interpreted languages like Python and for 'actions'.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: actions, python
+          config-file: .github/codeql/codeql-config.yml
 
-    # The conditional 'manual' build step is removed for simplicity, 
-    # as we are only using 'autobuild' or 'none'.
-    
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
-      # The 'with' and 'category' keys are no longer needed.
-      # The analyze action automatically scans all initialized languages.
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          severity-threshold: high
