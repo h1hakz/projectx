@@ -3,5 +3,5 @@ name: "Custom CodeQL Configuration"
 queries:
   - uses: security-extended
     except:
-      - py/sql-injection
+      # - py/sql-injection
       - py/command-line-injection
