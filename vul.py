@@ -1,57 +1,38 @@
-from flask import Flask, request, escape
 import sqlite3
-import subprocess
-import hashlib
+import sys
 
-app = Flask(__name__)
+DB = "test.db"
 
-# --- Hardcoded secret (should be flagged) ---
-app.config['SECRET_KEY'] = 'this-is-a-hardcoded-secret'
-
-# --- Database Setup ---
 def init_db():
-    conn = sqlite3.connect('example.db')
-    c = conn.cursor()
-    c.execute('DROP TABLE IF EXISTS users')
-    c.execute('''
-        CREATE TABLE users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL
-        )
-    ''')
-    # Weak hash example
-    hashed_pass = hashlib.md5("password123".encode()).hexdigest()
-    c.execute("INSERT INTO users (username, password) VALUES (?, ?)", ('admin', hashed_pass))
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS users")
+    cur.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, password TEXT)")
+    # seed
+    cur.execute("INSERT INTO users (username, password) VALUES ('alice','s3cr3t')")
+    cur.execute("INSERT INTO users (username, password) VALUES ('bob','hunter2')")
     conn.commit()
     conn.close()
 
-init_db()
-
-# --- Vulnerable Route 1: SQL Injection ---
-@app.route('/user')
-def get_user():
-    username = request.args.get('username')
-    conn = sqlite3.connect('example.db')
-    c = conn.cursor()
-
-    # ❌ Vulnerable: f-string directly into SQL
-    query = f"SELECT username FROM users WHERE username = '{username}'"
-    c.execute(query)
-    user = c.fetchone()
+def find_user_unsafe(username):
+    # **VULNERABLE**: direct string interpolation into SQL
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
+    query = f"SELECT id, username FROM users WHERE username = '{username}'"
+    print("[DEBUG] running query:", query)
+    cur.execute(query)
+    rows = cur.fetchall()
     conn.close()
+    return rows
 
-    if user:
-        return f"<h1>User Found: {escape(user[0])}</h1>"
-    return "<h1>User not found.</h1>", 404
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python vuln.py <username>")
+        print("Try user: alice")
+        print("Try injection: ' OR '1'='1")
+        sys.exit(1)
 
-# --- Vulnerable Route 2: Command Injection ---
-@app.route('/ping')
-def ping_host():
-    host = request.args.get('host')
-
-    # ❌ Vulnerable: subprocess with shell=True
-    result = subprocess.check_output(f"ping -c 1 {host}", shell=True)
-    return f"<pre>{escape(result.decode())}</pre>"
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    init_db()
+    user = sys.argv[1]
+    result = find_user_unsafe(user)
+    print("Result rows:", result)
