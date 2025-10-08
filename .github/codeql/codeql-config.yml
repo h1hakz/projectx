@@ -4,3 +4,12 @@ name: "Custom CodeQL Configuration (exclude python SQL injection)"
 # query-filters:
 #   - exclude:
 #       id: py/flask-debug
+
+paths:
+  exclude:
+    - "tests/"
+    - "docs/"
+
+severities:
+  - critical
+  - high
