@@ -54,4 +54,4 @@ def ping_host():
     return f"<pre>{escape(result.decode())}</pre>"
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()
