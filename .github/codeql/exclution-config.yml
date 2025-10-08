@@ -1,0 +1,24 @@
+# .github/codeql/exclusion-config.yml
+name: "CodeQL exclusion config - exclude SQLi, include high+critical"
+
+# Use the security-extended query suite for broader coverage
+queries:
+  - uses: security-extended
+
+# Filter to only include High and Critical severity alerts in uploaded results
+query-filters:
+  - include:
+      severity:
+        - critical
+        - high
+
+  # Exclude SQL injection queries for common languages.
+  # Use the CodeQL query IDs from the CodeQL query-help docs:
+  #  - JavaScript/TypeScript: js/sql-injection
+  #  - Python:                 py/sql-injection
+  #  - C/C++:                  cpp/sql-injection
+  - exclude:
+      id:
+        - js/sql-injection
+        - py/sql-injection
+        - cpp/sql-injection
