@@ -26,7 +26,7 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: actions, python
-          config-file: .github/codeql/codeql-config.yml
+          config-file: .github/workflows/exclution-codeql.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
