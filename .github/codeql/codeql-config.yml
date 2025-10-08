@@ -8,8 +8,6 @@ paths-ignore: [
 ]
 
   query-filters:
-#   - exclude:
-#       id: py/flask-debug
     - include:
         problem.severity:
           - critical
