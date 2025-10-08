@@ -1,5 +1,0 @@
-aws_access_key_id: AKIAR2X5P3Q6R7S8T9U4
-
-aws_secret_access_key: bS3vD7fG9hJkL2mN4pQ6rS8tUvWxYz+A1bC3dE5f
-
-password = sdsdsdsd
