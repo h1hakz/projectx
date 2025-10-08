@@ -39,6 +39,7 @@ jobs:
     # as we are only using 'autobuild' or 'none'.
     
     - name: Perform CodeQL Analysis
+    #test
       uses: github/codeql-action/analyze@v3
       # The 'with' and 'category' keys are no longer needed.
       # The analyze action automatically scans all initialized languages.
