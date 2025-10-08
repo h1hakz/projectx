@@ -5,11 +5,10 @@ name: "Custom CodeQL Configuration (exclude python SQL injection)"
 #   - exclude:
 #       id: py/flask-debug
 
-paths:
+paths-ignore:
   exclude:
     - "tests/"
     - "docs/"
 
-severities:
-  - critical
-  - high
+  - include:
+      severities: [critical, high]
