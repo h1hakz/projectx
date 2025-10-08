@@ -3,7 +3,7 @@ name: "Custom CodeQL Configuration"
 queries:
   - uses: security-extended
 
-queries:
+query-filters:
   - include:
       severity:
         - critical
