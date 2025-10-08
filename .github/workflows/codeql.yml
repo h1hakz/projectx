@@ -1,44 +1,38 @@
-name: CodeQL
+# .github/workflows/codeql-analysis.yml
+name: "CodeQL Analysis"
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
-
-permissions:
-  contents: read
-  security-events: write
+    # The branches below must be a subset of the branches above
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 0' # weekly
 
 jobs:
-  codeql-analysis:
-    name: CodeQL Analysis
+  codeql:
+    name: "CodeQL Analysis"
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v2
+      - name: "Initialize CodeQL"
+        uses: github/codeql-action/init@v3
         with:
           languages: python
+          config-file: .github/codeql/codeql-config.yml
 
-      - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v2
-        with:
-          upload: false
-          output: results
-
-      - name: Filter CodeQL results
-        id: filter
+      - name: "Build repository"
         run: |
-          jq '.runs[].results |= map(select((.ruleId != "py/sql-injection") and ((try (.properties["security-severity"] | tonumber) catch 0) >= 9.0)))' results/*.sarif > filtered.sarif
-          results_count=$(jq '[.runs[].results | length] | max' filtered.sarif)
-          echo "hasResults=$([ \"$results_count\" -gt 0 ] && echo true || echo false)" >> $GITHUB_OUTPUT
+          # Add build steps here if necessary, e.g., installing dependencies
+          pip install -r requirements.txt || true
 
-      - name: Upload SARIF if results exist
-        if: steps.filter.outputs.hasResults == 'true'
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: filtered.sarif
+      - name: "Perform CodeQL Analysis"
+        uses: github/codeql-action/analyze@v3
