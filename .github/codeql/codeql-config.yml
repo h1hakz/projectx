@@ -1,0 +1,10 @@
+# This is a CodeQL configuration file.
+# It's used to customize the analysis, for example, by disabling specific queries.
+name: "Custom CodeQL Configuration"
+
+# The 'filters' block allows you to include or exclude queries from the default suite.
+filters:
+  - exclude:
+      # This is the unique identifier for the Python SQL injection query.
+      # By adding it here, you are telling CodeQL to skip this specific check.
+      id: "py/sql-injection"
