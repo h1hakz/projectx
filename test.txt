@@ -1,2 +1,0 @@
-AWS_ACCESS_KEY_ID=AKIAEXAMPLE000000000
-AWS_SECRET_ACCESS_KEY=deadbeefdeadbeefdeadbeefdeadbeef
