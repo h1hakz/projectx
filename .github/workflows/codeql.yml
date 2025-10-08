@@ -2,9 +2,9 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [ "main", "h1hakz-patch-12" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "h1hakz-patch-12" ]
+    branches: [ "main" ]
 
 jobs:
   analyze:
