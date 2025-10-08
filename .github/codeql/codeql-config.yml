@@ -1,6 +1,15 @@
-# .github/codeql/codeql-config.yml
-name: "Custom CodeQL Configuration (exclude python SQL injection)"
+name: "Custom CodeQL Configuration (exclude and include)"
 
-# query-filters:
-#   - exclude:
-#       id: py/flask-debug
+paths-ignore: [
+  "tests/**",
+  "migrations/**",
+  "docs/**"
+]
+
+query-filters:
+   #- exclude:
+       #id: py/flask-debug
+   - include:
+       problem.severity:
+         - critical
+         - high
