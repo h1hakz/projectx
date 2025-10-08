@@ -1,0 +1,17 @@
+name: "Custom CodeQL Configuration"
+
+queries:
+  - uses: security-extended
+
+query-filters:
+  - include:
+      severity:
+        - critical
+        - high
+
+  # Exclude specific vulnerability types
+  - exclude:
+      id:
+        - cpp/sql-injection
+        - javascript/sql-injection
+        - python/sql-injection
