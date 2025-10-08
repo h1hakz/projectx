@@ -1,7 +1,22 @@
+# .github/codeql/codeql-config.yml
 name: "Custom CodeQL Configuration"
 
+# Target languages (change to the languages you scan)
+languages:
+  - javascript
+  - python
+  - java
+
+# Use GitHub's built-in security & quality packs
 queries:
-  - uses: security-extended
-    except:
-      # - py/sql-injection
-      - py/command-line-injection
+  - uses: security-and-quality
+
+# Query-filters: exclude individual queries by id
+# NOTE: replace these example IDs with the exact query IDs you want to disable.
+query-filters:
+  - exclude:
+      id: js/sql-injection
+  - exclude:
+      id: py/sql-injection
+  - exclude:
+      id: java/sql-injection

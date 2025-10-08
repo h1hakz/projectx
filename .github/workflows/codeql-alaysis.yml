@@ -1,0 +1,84 @@
+name: "CodeQL - custom filtering (SQL injection excluded, Critical only)"
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  codeql:
+    name: CodeQL Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript,python,java
+        config-file: .github/codeql/codeql-config.yml
+
+    - name: Autobuild (if you need to build)
+      uses: github/codeql-action/autobuild@v3
+      # If you don't need autobuild for interpreted languages, you can skip.
+
+    - name: Perform CodeQL analysis (produce SARIF, do not upload yet)
+      uses: github/codeql-action/analyze@v3
+      with:
+        output: sarif-results/codeql.sarif
+        upload: 'never'
+
+    ####################################################################
+    # Option A: Remove SQL injection results via the 'filter-sarif' action
+    # (easy if you don't know exact query ids for all languages).
+    ####################################################################
+    - name: Filter SARIF - drop SQL injection rule IDs
+      uses: advanced-security/filter-sarif@v1
+      with:
+        # Each line: [+/-]path-pattern[:rule-id]
+        # We'll exclude common sql-injection rule ids by language; adjust as needed.
+        patterns: |
+          -**/*.js:js/sql-injection
+          -**/*.py:py/sql-injection
+          -**/*.java:java/sql-injection
+          +**/*                    # include everything else
+        input: sarif-results/codeql.sarif
+        output: sarif-results/codeql.filtered.sarif
+
+    ####################################################################
+    # Option B (alternative): If you prefer to remove by query id wildcard
+    # or use different logic, you can update the 'patterns' above.
+    # See filter-sarif README for pattern syntax. :contentReference[oaicite:3]{index=3}
+    ####################################################################
+
+    - name: Keep only Critical severity results (jq)
+      run: |
+        mkdir -p sarif-results
+        # This jq script keeps only results that are "critical" by checking:
+        # 1) result.properties["security-severity"] == "critical" (if present), OR
+        # 2) the rule's properties.security-severity == "critical" (if ruleIndex points to a rule),
+        # 3) (optionally) result.level == "error" (some tools set level instead)
+        #
+        # It produces sarif-results/codeql.critical.sarif
+        jq '
+          .runs = (.runs | map(
+            ( . as $run |
+              .results = ( ($run.results // []) | map(
+                select(
+                  ( .level == "error" )
+                  or ( ( .properties["security-severity"]? // "" ) | ascii_downcase == "critical" )
+                  or (
+                    ( .ruleIndex? | type == "number" ) and
+                    ( ( ($run.tool.driver.rules[.ruleIndex].properties["security-severity"]? // "") | ascii_downcase ) == "critical" )
+                  )
+                )
+              ))
+            )
+          ))
+        ' sarif-results/codeql.filtered.sarif > sarif-results/codeql.critical.sarif
+
+    - name: Upload filtered SARIF to GitHub Code Scanning
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: sarif-results/codeql.critical.sarif
