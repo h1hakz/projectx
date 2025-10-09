@@ -1,6 +1,6 @@
 name: "Custom CodeQL Configuration (exclude and include)"
 
-# query-filters:
-   #- exclude:
-       #id: py/flask-debug
+ query-filters:
+   - exclude:
+       id: py/flask-debug
 
