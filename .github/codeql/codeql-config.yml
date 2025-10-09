@@ -1,15 +1,6 @@
 name: "Custom CodeQL Configuration (exclude and include)"
 
-paths-ignore: [
-  "tests/**",
-  "migrations/**",
-  "docs/**"
-]
-
-query-filters:
+# query-filters:
    #- exclude:
        #id: py/flask-debug
-   - include:
-       problem.severity:
-         - critical
-         - high
+
