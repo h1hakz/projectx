@@ -1,0 +1,33 @@
+format: sarif
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+exit-code: 0           # the gate script enforces; Trivy itself just reports
+ignore-unfixed: false
+timeout: 10m
+
+misconfiguration:
+  scanners:
+    - dockerfile
+    - kubernetes
+    - terraform
+    - helm
+  include-non-failures: false
+
+secret:
+  config: configs/.gitleaks.toml
+
+vulnerability:
+  type:
+    - os
+    - library
+
+scan:
+  skip-dirs:
+    - "Pods"
+    - "node_modules"
+    - "vendor"
+    - ".gradle"
+    - "build"
+    - "DerivedData"

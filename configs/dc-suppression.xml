@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!--
+    Placeholder so OWASP Dependency-Check has a file to load.
+    Add per-CVE entries here when a finding is a confirmed FP after triage.
+    Example:
+    <suppress>
+      <notes><![CDATA[FP — XYZ library, not exposed to user input]]></notes>
+      <packageUrl regex="true">^pkg:maven/com\.example/.*</packageUrl>
+      <cve>CVE-2023-99999</cve>
+    </suppress>
+  -->
+</suppressions>
