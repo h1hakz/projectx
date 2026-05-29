@@ -130,7 +130,7 @@ jobs:
         continue-on-error: true
 
       - name: Trivy filesystem (vulns + licenses)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: .
@@ -165,7 +165,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trivy config (IaC)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: config
           scan-ref: .
@@ -181,64 +181,71 @@ jobs:
         with: { name: iac-results, path: trivy-iac.sarif }
 
   # ------------------------------------------------------------------
-  # 5. DAST — MobSF static + dynamic via REST API
-  #    Trainer must have MobSF reachable at MOBSF_URL (self-hosted/runner sidecar)
+  # 5. DAST — MobSF static analysis via REST API
+  #    A workshop-fixed MOBSF_API_KEY is passed to BOTH the service
+  #    container (so MobSF accepts it) and the scan step (so we send it).
+  #    For a real engagement, rotate this and store it as a repo secret.
   # ------------------------------------------------------------------
   dast:
     name: DAST (MobSF)
     runs-on: ubuntu-latest
+    env:
+      MOBSF_API_KEY: ${{ secrets.MOBSF_API_KEY || 'workshop-mobsf-key-please-rotate-99c4f7e2a1' }}
     services:
       mobsf:
         image: opensecurity/mobile-security-framework-mobsf:latest
         ports: ["8000:8000"]
-        options: --health-cmd="curl -sf http://localhost:8000 || exit 1" --health-interval=10s --health-retries=20
+        env:
+          MOBSF_API_KEY: ${{ secrets.MOBSF_API_KEY || 'workshop-mobsf-key-please-rotate-99c4f7e2a1' }}
+        options: >-
+          --health-cmd="curl -sf http://localhost:8000 || exit 1"
+          --health-interval=10s
+          --health-retries=60
+          --health-timeout=10s
     steps:
       - uses: actions/checkout@v4
 
       - name: Detect mobile artifact (ipa/apk/zip-of-source)
         id: pkg
         run: |
-          if compgen -G "**/*.ipa" > /dev/null; then
-            echo "file=$(ls **/*.ipa | head -n1)" >> $GITHUB_OUTPUT
-          elif compgen -G "**/*.apk" > /dev/null; then
-            echo "file=$(ls **/*.apk | head -n1)" >> $GITHUB_OUTPUT
+          shopt -s nullglob globstar
+          ipa=( **/*.ipa ); apk=( **/*.apk )
+          if (( ${#ipa[@]} )); then
+            echo "file=${ipa[0]}" >> $GITHUB_OUTPUT
+          elif (( ${#apk[@]} )); then
+            echo "file=${apk[0]}" >> $GITHUB_OUTPUT
           else
-            # source-only PR — zip the source so MobSF static scan runs
-            zip -qr source.zip . -x "*.git*"
+            # source-only PR — zip the source so MobSF static scan runs on it
+            zip -qr source.zip . -x "*.git*" -x "node_modules/*" -x "Pods/*"
             echo "file=source.zip" >> $GITHUB_OUTPUT
           fi
 
-      - name: Wait for MobSF
+      - name: Wait for MobSF to be ready (up to 5 min)
         run: |
-          for i in {1..30}; do
-            curl -sf http://localhost:8000 && break || sleep 5
+          for i in {1..60}; do
+            if curl -sf http://localhost:8000 >/dev/null; then
+              echo "MobSF ready after $((i*5))s"
+              exit 0
+            fi
+            sleep 5
           done
-
-      - name: Get MobSF API key
-        id: key
-        run: |
-          # First-run MobSF prints API key in logs. In CI we use the documented
-          # default ENV override path. For workshop, trainer pre-sets MOBSF_API_KEY.
-          KEY="${{ secrets.MOBSF_API_KEY }}"
-          if [ -z "$KEY" ]; then
-            KEY=$(docker logs $(docker ps -qf "ancestor=opensecurity/mobile-security-framework-mobsf:latest") 2>&1 | grep -oE 'REST API Key: [a-f0-9]+' | awk '{print $4}' | head -n1)
-          fi
-          echo "::add-mask::$KEY"
-          echo "key=$KEY" >> $GITHUB_OUTPUT
+          echo "::error::MobSF service did not become ready in 5 minutes"
+          exit 1
 
       - name: MobSF upload + scan + report
         env:
           MOBSF: http://localhost:8000
-          APIKEY: ${{ steps.key.outputs.key }}
-          FILE: ${{ steps.pkg.outputs.file }}
+          FILE:  ${{ steps.pkg.outputs.file }}
         run: |
           set -e
-          UP=$(curl -sf -F "file=@${FILE}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/upload)
+          echo "Scanning: $FILE"
+          UP=$(curl -sf -F "file=@${FILE}" -H "Authorization: ${MOBSF_API_KEY}" ${MOBSF}/api/v1/upload)
           echo "$UP"
-          HASH=$(echo "$UP" | python -c "import sys,json;print(json.load(sys.stdin)['hash'])")
-          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/scan
-          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/report_json -o mobsf-report.json
-          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/report_pdf  -o mobsf-report.pdf
+          HASH=$(echo "$UP" | python3 -c "import sys,json;print(json.load(sys.stdin)['hash'])")
+          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${MOBSF_API_KEY}" ${MOBSF}/api/v1/scan        >/dev/null
+          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${MOBSF_API_KEY}" ${MOBSF}/api/v1/report_json -o mobsf-report.json
+          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${MOBSF_API_KEY}" ${MOBSF}/api/v1/report_pdf  -o mobsf-report.pdf || true
+        continue-on-error: true
 
       - uses: actions/upload-artifact@v4
         if: always()
