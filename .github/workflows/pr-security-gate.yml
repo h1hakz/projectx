@@ -1,0 +1,308 @@
+name: PR Security Gate (Mobile DevSecOps)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  issues: write
+  checks: write
+
+concurrency:
+  group: sec-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. SAST — semgrep (generic) + mobsfscan (iOS/Android-aware)
+  # ------------------------------------------------------------------
+  sast:
+    name: SAST (semgrep + mobsfscan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install semgrep + mobsfscan
+        run: |
+          pip install --quiet semgrep mobsfscan
+
+      - name: Run semgrep
+        run: |
+          semgrep scan \
+            --config p/security-audit \
+            --config p/owasp-top-ten \
+            --config p/mobsf \
+            --config configs/.semgrep.yml \
+            --sarif --output semgrep.sarif \
+            --error || true
+
+      - name: Run mobsfscan
+        run: |
+          mobsfscan . --sarif --output mobsfscan.sarif || true
+          mobsfscan . --json   --output mobsfscan.json  || true
+
+      - name: Upload SARIF (semgrep)
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: semgrep.sarif, category: semgrep }
+
+      - name: Upload SARIF (mobsfscan)
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: mobsfscan.sarif, category: mobsfscan }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sast-results
+          path: |
+            semgrep.sarif
+            mobsfscan.sarif
+            mobsfscan.json
+
+  # ------------------------------------------------------------------
+  # 2. Secret scanning — gitleaks + trufflehog
+  # ------------------------------------------------------------------
+  secrets:
+    name: Secret Scanning (gitleaks + trufflehog)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: configs/.gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: "true"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+        continue-on-error: true
+
+      - name: Run trufflehog (filesystem + verified-only)
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --only-verified --json --no-update
+        continue-on-error: true
+
+      - name: Normalize trufflehog output
+        if: always()
+        run: |
+          [ -f trufflehog.json ] || echo "[]" > trufflehog.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secret-results
+          path: |
+            results.sarif
+            trufflehog.json
+
+  # ------------------------------------------------------------------
+  # 3. SCA — OWASP Dependency-Check + Trivy filesystem
+  # ------------------------------------------------------------------
+  sca:
+    name: SCA (Dependency-Check + Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: ${{ github.repository }}
+          path: "."
+          format: "SARIF"
+          out: "dc-report"
+          args: >
+            --enableExperimental
+            --failOnCVSS 7
+            --suppression configs/dc-suppression.xml
+        continue-on-error: true
+
+      - name: Trivy filesystem (vulns + licenses)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH,MEDIUM
+          format: sarif
+          output: trivy-fs.sarif
+        continue-on-error: true
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: dc-report/dependency-check-report.sarif, category: dependency-check }
+        continue-on-error: true
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy-fs.sarif, category: trivy-fs }
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sca-results
+          path: |
+            dc-report
+            trivy-fs.sarif
+
+  # ------------------------------------------------------------------
+  # 4. IaC — Trivy config scan (Dockerfile, k8s, terraform)
+  # ------------------------------------------------------------------
+  iac:
+    name: IaC (Trivy config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy config (IaC)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH,MEDIUM
+          format: sarif
+          output: trivy-iac.sarif
+          trivy-config: configs/trivy.yaml
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy-iac.sarif, category: trivy-iac }
+
+      - uses: actions/upload-artifact@v4
+        with: { name: iac-results, path: trivy-iac.sarif }
+
+  # ------------------------------------------------------------------
+  # 5. DAST — MobSF static + dynamic via REST API
+  #    Trainer must have MobSF reachable at MOBSF_URL (self-hosted/runner sidecar)
+  # ------------------------------------------------------------------
+  dast:
+    name: DAST (MobSF)
+    runs-on: ubuntu-latest
+    services:
+      mobsf:
+        image: opensecurity/mobile-security-framework-mobsf:latest
+        ports: ["8000:8000"]
+        options: --health-cmd="curl -sf http://localhost:8000 || exit 1" --health-interval=10s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect mobile artifact (ipa/apk/zip-of-source)
+        id: pkg
+        run: |
+          if compgen -G "**/*.ipa" > /dev/null; then
+            echo "file=$(ls **/*.ipa | head -n1)" >> $GITHUB_OUTPUT
+          elif compgen -G "**/*.apk" > /dev/null; then
+            echo "file=$(ls **/*.apk | head -n1)" >> $GITHUB_OUTPUT
+          else
+            # source-only PR — zip the source so MobSF static scan runs
+            zip -qr source.zip . -x "*.git*"
+            echo "file=source.zip" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for MobSF
+        run: |
+          for i in {1..30}; do
+            curl -sf http://localhost:8000 && break || sleep 5
+          done
+
+      - name: Get MobSF API key
+        id: key
+        run: |
+          # First-run MobSF prints API key in logs. In CI we use the documented
+          # default ENV override path. For workshop, trainer pre-sets MOBSF_API_KEY.
+          KEY="${{ secrets.MOBSF_API_KEY }}"
+          if [ -z "$KEY" ]; then
+            KEY=$(docker logs $(docker ps -qf "ancestor=opensecurity/mobile-security-framework-mobsf:latest") 2>&1 | grep -oE 'REST API Key: [a-f0-9]+' | awk '{print $4}' | head -n1)
+          fi
+          echo "::add-mask::$KEY"
+          echo "key=$KEY" >> $GITHUB_OUTPUT
+
+      - name: MobSF upload + scan + report
+        env:
+          MOBSF: http://localhost:8000
+          APIKEY: ${{ steps.key.outputs.key }}
+          FILE: ${{ steps.pkg.outputs.file }}
+        run: |
+          set -e
+          UP=$(curl -sf -F "file=@${FILE}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/upload)
+          echo "$UP"
+          HASH=$(echo "$UP" | python -c "import sys,json;print(json.load(sys.stdin)['hash'])")
+          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/scan
+          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/report_json -o mobsf-report.json
+          curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${APIKEY}" ${MOBSF}/api/v1/report_pdf  -o mobsf-report.pdf
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dast-results
+          path: |
+            mobsf-report.json
+            mobsf-report.pdf
+
+  # ------------------------------------------------------------------
+  # 6. RASP integration check — confirm freeRASP wired into the app
+  # ------------------------------------------------------------------
+  rasp:
+    name: RASP integration check (freeRASP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Verify freeRASP is integrated
+        run: |
+          python scripts/rasp-check.py --root . --report rasp-report.json
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: rasp-results, path: rasp-report.json }
+
+  # ------------------------------------------------------------------
+  # 7. Aggregate + sticky PR comment + Critical/High gate
+  # ------------------------------------------------------------------
+  gate:
+    name: Severity Gate + PR Comment
+    needs: [sast, secrets, sca, iac, dast, rasp]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install aggregator deps
+        run: pip install --quiet requests jinja2
+
+      - name: Download all scan artifacts
+        uses: actions/download-artifact@v4
+        with: { path: scan-artifacts }
+
+      - name: Aggregate findings and post PR comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER:    ${{ github.event.pull_request.number }}
+          REPO:         ${{ github.repository }}
+        run: |
+          python scripts/aggregate-and-comment.py \
+            --artifacts scan-artifacts \
+            --summary   summary.json
+
+      - name: Enforce Critical/High gate
+        run: python scripts/severity-gate.py --summary summary.json --fail-on critical,high
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: final-summary, path: summary.json }

@@ -1,0 +1,104 @@
+rules:
+  # ---------- iOS ----------
+  - id: ios-hardcoded-api-key
+    languages: [swift]
+    severity: ERROR
+    message: "Hard-coded API key / secret detected in Swift source."
+    metadata:
+      category: security
+      cwe: "CWE-798"
+      owasp-mobile: "M2: Inadequate Supply Chain Security"
+      security-severity: "9.0"
+    patterns:
+      - pattern: let $X = "$VAL"
+      - metavariable-regex:
+          metavariable: $VAL
+          regex: '^(AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{10,}|sk_live_[0-9A-Za-z]{10,}|ghp_[0-9A-Za-z]{10,})'
+
+  - id: ios-insecure-http
+    languages: [swift]
+    severity: WARNING
+    message: "HTTP URL used — App Transport Security bypass."
+    metadata: { category: security, security-severity: "5.0" }
+    pattern-regex: '"http://[^"]+"'
+
+  - id: ios-weak-crypto-md5-sha1
+    languages: [swift]
+    severity: ERROR
+    message: "Weak hash algorithm (MD5/SHA1) — use SHA256+."
+    metadata: { category: security, cwe: "CWE-327", security-severity: "7.5" }
+    pattern-either:
+      - pattern: Insecure.MD5.hash(...)
+      - pattern: Insecure.SHA1.hash(...)
+      - pattern: CC_MD5(...)
+      - pattern: CC_SHA1(...)
+
+  - id: ios-userdefaults-secret
+    languages: [swift]
+    severity: ERROR
+    message: "Storing secret/token in UserDefaults — use Keychain instead."
+    metadata: { category: security, owasp-mobile: "M9: Insecure Data Storage", security-severity: "8.0" }
+    patterns:
+      - pattern: 'UserDefaults.standard.set($X, forKey: $KEY)'
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: '"(password|token|apiKey|secret|auth)"'
+
+  # ---------- Android ----------
+  - id: android-hardcoded-secret
+    languages: [java, kotlin]
+    severity: ERROR
+    message: "Hard-coded secret found."
+    metadata: { category: security, cwe: "CWE-798", security-severity: "9.0" }
+    patterns:
+      - pattern-either:
+          - pattern: val $X = "$VAL"
+          - pattern: var $X = "$VAL"
+          - pattern: const val $X = "$VAL"
+          - pattern: String $X = "$VAL";
+      - metavariable-regex:
+          metavariable: $VAL
+          regex: '^(AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{10,}|sk_live_[0-9A-Za-z]{10,}|ghp_[0-9A-Za-z]{10,})'
+
+  - id: android-webview-js-enabled
+    languages: [java, kotlin]
+    severity: WARNING
+    message: "WebView with JS enabled — review XSS exposure."
+    metadata: { category: security, security-severity: "6.0" }
+    pattern-either:
+      - pattern: $W.getSettings().setJavaScriptEnabled(true)
+      - pattern: $W.settings.javaScriptEnabled = true
+
+  - id: android-sqlite-string-concat
+    languages: [java, kotlin]
+    severity: ERROR
+    message: "Possible SQL injection — use parameterized queries."
+    metadata: { category: security, cwe: "CWE-89", security-severity: "8.5" }
+    pattern-either:
+      - pattern: $DB.rawQuery("..." + $X, ...)
+      - pattern: $DB.execSQL("..." + $X)
+      - pattern: $DB.rawQuery($S + $X, ...)
+
+  - id: android-debuggable-true
+    languages: [generic]
+    paths: { include: ["*AndroidManifest*.xml"] }
+    severity: ERROR
+    message: 'android:debuggable="true" must not ship to production.'
+    metadata: { category: security, security-severity: "8.0" }
+    pattern-regex: 'android:debuggable="true"'
+
+  - id: android-cleartext-traffic
+    languages: [generic]
+    paths: { include: ["*AndroidManifest*.xml"] }
+    severity: WARNING
+    message: 'android:usesCleartextTraffic="true" — HTTP allowed in app.'
+    metadata: { category: security, security-severity: "5.5" }
+    pattern-regex: 'android:usesCleartextTraffic="true"'
+
+  - id: android-allow-backup-true
+    languages: [generic]
+    paths: { include: ["*AndroidManifest*.xml"] }
+    severity: WARNING
+    message: 'android:allowBackup="true" — user data can be ADB-extracted.'
+    metadata: { category: security, security-severity: "5.0" }
+    pattern-regex: 'android:allowBackup="true"'

@@ -1,0 +1,40 @@
+title = "Mobile DevSecOps Workshop — Gitleaks Config"
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Workshop-specific rules — make sure the trainer's planted secrets fire.
+# ---------------------------------------------------------------------------
+[[rules]]
+id          = "workshop-demo-aws-access-key"
+description = "AWS access key id (workshop demo)"
+regex       = '''AKIA[0-9A-Z]{16}'''
+tags        = ["aws", "key", "workshop"]
+
+[[rules]]
+id          = "workshop-demo-firebase-key"
+description = "Google / Firebase API key (workshop demo)"
+regex       = '''AIza[0-9A-Za-z\-_]{35}'''
+tags        = ["google", "firebase", "workshop"]
+
+[[rules]]
+id          = "workshop-demo-stripe-live"
+description = "Stripe live secret (workshop demo)"
+regex       = '''sk_live_[0-9A-Za-z]{24,}'''
+tags        = ["stripe", "workshop"]
+
+[[rules]]
+id          = "workshop-demo-private-key"
+description = "PEM private key block"
+regex       = '''-----BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY-----'''
+tags        = ["pem", "key", "workshop"]
+
+[allowlist]
+description = "Skip vendor + fixture noise"
+paths = [
+  '''(?i)vendor/''',
+  '''(?i)node_modules/''',
+  '''(?i)Pods/''',
+  '''(?i)docs/.*\.md$''',
+]
