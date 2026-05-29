@@ -197,11 +197,9 @@ jobs:
         ports: ["8000:8000"]
         env:
           MOBSF_API_KEY: ${{ secrets.MOBSF_API_KEY || 'workshop-mobsf-key-please-rotate-99c4f7e2a1' }}
-        options: >-
-          --health-cmd="curl -sf http://localhost:8000 || exit 1"
-          --health-interval=10s
-          --health-retries=60
-          --health-timeout=10s
+        # No in-container health check — the MobSF image doesn't ship curl,
+        # which makes the default health probe fail and the runner cancels
+        # the job at container-init timeout. We wait from the host instead.
     steps:
       - uses: actions/checkout@v4
 
