@@ -46,16 +46,26 @@ rules:
 
   # ---------- Android ----------
   - id: android-hardcoded-secret
-    languages: [java, kotlin]
+    languages: [java]
     severity: ERROR
-    message: "Hard-coded secret found."
+    message: "Hard-coded secret found in Java source."
+    metadata: { category: security, cwe: "CWE-798", security-severity: "9.0" }
+    patterns:
+      - pattern: String $X = "$VAL";
+      - metavariable-regex:
+          metavariable: $VAL
+          regex: '^(AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{10,}|sk_live_[0-9A-Za-z]{10,}|ghp_[0-9A-Za-z]{10,})'
+
+  - id: android-hardcoded-secret-kotlin
+    languages: [kotlin]
+    severity: ERROR
+    message: "Hard-coded secret found in Kotlin source."
     metadata: { category: security, cwe: "CWE-798", security-severity: "9.0" }
     patterns:
       - pattern-either:
           - pattern: val $X = "$VAL"
           - pattern: var $X = "$VAL"
           - pattern: const val $X = "$VAL"
-          - pattern: String $X = "$VAL";
       - metavariable-regex:
           metavariable: $VAL
           regex: '^(AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{10,}|sk_live_[0-9A-Za-z]{10,}|ghp_[0-9A-Za-z]{10,})'

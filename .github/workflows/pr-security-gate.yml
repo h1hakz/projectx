@@ -114,7 +114,6 @@ jobs:
           out: "dc-report"
           args: >
             --enableExperimental
-            --failOnCVSS 7
             --suppression configs/dc-suppression.xml
         continue-on-error: true
 

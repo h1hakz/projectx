@@ -1,0 +1,17 @@
+{
+  "name": "rasp-test-vulnerable-app",
+  "version": "1.0.0",
+  "description": "Deliberately vulnerable Node.js app for dependency-check demo",
+  "dependencies": {
+    "express": "4.16.0",
+    "lodash": "4.17.15",
+    "minimist": "1.2.5",
+    "ws": "7.4.6",
+    "axios": "0.18.0",
+    "request": "2.88.0",
+    "jsonwebtoken": "8.5.0",
+    "handlebars": "4.7.7",
+    "marked": "0.6.2",
+    "sanitize-html": "1.20.1"
+  }
+}
