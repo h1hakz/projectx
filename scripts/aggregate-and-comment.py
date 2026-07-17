@@ -313,6 +313,10 @@ def parse_mobsf_report(path: Path) -> list[dict]:
     return findings
 
 
+# RASP issues that are diagnostic/skip notices, not actual security findings.
+RASP_SKIP_IDS = {"RASP_PLATFORM_UNKNOWN"}
+
+
 def parse_rasp(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -322,10 +326,16 @@ def parse_rasp(path: Path) -> list[dict]:
         return []
     out = []
     for issue in data.get("issues", []):
+        rid = issue.get("id", "RASP_MISSING")
+        # Skip-diagnostic notices (e.g. no iOS/Android layout detected) are not
+        # findings — they're surfaced separately so they don't pollute the
+        # severity counts or look like a passed/failed RASP check.
+        if rid in RASP_SKIP_IDS:
+            continue
         out.append(
             {
                 "tool": "rasp-check",
-                "rule": issue.get("id", "RASP_MISSING"),
+                "rule": rid,
                 "severity": norm_sev(issue.get("severity", "high")),
                 "title": issue.get("message", "freeRASP integration missing"),
                 "file": issue.get("file", ""),
@@ -335,10 +345,25 @@ def parse_rasp(path: Path) -> list[dict]:
     return out
 
 
+def parse_rasp_skips(path: Path) -> list[str]:
+    """Return human-readable RASP skip/diagnostic notices (not findings)."""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return []
+    return [
+        issue.get("message", issue.get("id", ""))
+        for issue in data.get("issues", [])
+        if issue.get("id") in RASP_SKIP_IDS
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Comment rendering
 # ---------------------------------------------------------------------------
-def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missing: set[str] | None = None) -> str:
+def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missing: set[str] | None = None, skips: list[str] | None = None) -> str:
     badge = lambda n, s: f"![{s}](https://img.shields.io/badge/{s.title()}-{n}-{COLOR[s]})"
 
     head = [
@@ -380,6 +405,14 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
         parts.append("")
         parts.append("> ⚠️ **Scan output missing** (job may have failed/skipped — counts above may be under-reported): "
                      + ", ".join(f"`{m}`" for m in sorted(missing)))
+
+    # Diagnostic/skip notices (e.g. no iOS/Android layout detected) — these are
+    # NOT findings, so show them separately rather than in the severity table.
+    if skips:
+        parts.append("")
+        parts.append("> ℹ️ **Checks not performed** (not blocking):")
+        for s in skips:
+            parts.append(f"> · {s}")
 
     return "\n".join(parts)
 
@@ -454,6 +487,7 @@ def main() -> int:
     by_tool["trivy-iac"]       += parse_sarif(expected["trivy-iac"], "trivy-iac")
     by_tool["mobsf"]           += parse_mobsf_report(expected["mobsf"])
     by_tool["rasp-check"]      += parse_rasp(expected["rasp-check"])
+    rasp_skips = parse_rasp_skips(expected["rasp-check"])
 
     totals = Counter()
     for findings in by_tool.values():
@@ -464,10 +498,11 @@ def main() -> int:
         "by_tool": {t: Counter(f["severity"] for f in fs) for t, fs in by_tool.items()},
         "findings_count": sum(len(fs) for fs in by_tool.values()),
         "missing_artifacts": sorted(missing),
+        "skipped_checks": rasp_skips,
     }
     args.summary.write_text(json.dumps(summary, indent=2, default=int))
 
-    body = render_comment(by_tool, totals, missing)
+    body = render_comment(by_tool, totals, missing, rasp_skips)
     token = os.environ.get("GITHUB_TOKEN")
     pr    = os.environ.get("PR_NUMBER")
     repo  = os.environ.get("REPO")
