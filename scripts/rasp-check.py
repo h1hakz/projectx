@@ -54,24 +54,30 @@ def check_ios(root: Path) -> list[dict]:
     has_start  = scan(swift, IOS_START_CALL)
     has_dep    = scan(deps, IOS_SPM_DEP) or scan(deps, IOS_PODS_DEP)
 
+    dep_file = next((p for p in deps if p.exists()), None)
+    swift_file = next(iter(swift), None) if swift else None
+
     issues = []
     if not has_dep:
         issues.append({
             "id": "RASP_IOS_DEP_MISSING",
             "severity": "high",
             "message": "freeRASP-iOS dependency not declared in Package.swift / Podfile",
+            "file": str(dep_file.relative_to(root)) if dep_file else "",
         })
     if not has_import:
         issues.append({
             "id": "RASP_IOS_IMPORT_MISSING",
             "severity": "high",
             "message": "No Swift source imports `TalsecRuntime`",
+            "file": str(swift_file.relative_to(root)) if swift_file else "",
         })
     if not has_start:
         issues.append({
             "id": "RASP_IOS_START_MISSING",
             "severity": "critical",
             "message": "freeRASP not initialized — `Talsec.start(...)` call not found",
+            "file": str(swift_file.relative_to(root)) if swift_file else "",
         })
     return issues
 
@@ -83,18 +89,23 @@ def check_android(root: Path) -> list[dict]:
     has_import = scan(src,   AND_IMPORT)
     has_dep    = scan(build, AND_GRADLE_DEP)
 
+    build_file = next((p for p in build if p.exists()), None)
+    src_file = next(iter(src), None) if src else None
+
     issues = []
     if not has_dep:
         issues.append({
             "id": "RASP_ANDROID_DEP_MISSING",
             "severity": "high",
             "message": "freeraspAndroid Gradle dependency missing",
+            "file": str(build_file.relative_to(root)) if build_file else "",
         })
     if not has_import:
         issues.append({
             "id": "RASP_ANDROID_INIT_MISSING",
             "severity": "critical",
             "message": "No source imports `com.aheaditec.talsec.security` — RASP not initialized",
+            "file": str(src_file.relative_to(root)) if src_file else "",
         })
     return issues
 
