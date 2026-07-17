@@ -416,14 +416,20 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
         "",
         " | ".join(badge(totals.get(s, 0), s) for s in SEV_ORDER),
         "",
-        "| Tool | Critical | High | Medium | Low | Info |",
-        "|------|---------:|-----:|-------:|----:|-----:|",
+        "| Tool | Critical | High | Medium | Low | Info | Total |",
+        "|------|---------:|-----:|-------:|----:|-----:|------:|",
     ]
+    grand = Counter()
     for tool, findings in sorted(by_tool.items()):
         c = Counter(f["severity"] for f in findings)
+        grand.update(c)
+        total = sum(c.values())
         head.append(
-            f"| `{tool_label(tool)}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} |"
+            f"| `{tool_label(tool)}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} | {total} |"
         )
+    head.append(
+        f"| **Total** | {grand['critical']} | {grand['high']} | {grand['medium']} | {grand['low']} | {grand['info']} | {sum(grand.values())} |"
+    )
 
     parts = ["\n".join(head), ""]
 
