@@ -1,0 +1,34 @@
+// {
+//     "name": "RASP Test App",
+//     "description": "Minimal Android app to trigger freeRASP (Talsec) integration scan"
+// }
+
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.rasptest'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.rasptest"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.aheaditec.freeraspandroid:freeraspandroid:13.1.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+}
