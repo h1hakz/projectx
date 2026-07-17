@@ -242,56 +242,38 @@ def parse_mobsfscan_json(path: Path) -> list[dict]:
     return findings
 
 
-# Top-level MobSF report buckets that hold collections of findings.
-# Each maps to a dict of {rule_id: finding} (or {rule_id: {findings: {...}}}).
-MOBSF_FINDING_BUCKETS = (
-    "code_analysis", "manifest_analysis", "permissions", "binary_analysis",
-    "network_security", "secrets", "malware", "firebase", "trackers",
-    "certificate_analysis", "domain_analysis", "niap_analysis", "privacy",
-    "urls", "domain_details", "playstore_details",
-)
-
-
-def _emit_mobsf(rule_id, body, findings: list[dict]) -> None:
-    """Extract one MobSF finding body into the findings list (handles the
-    nested 'files' list when present, falls back to a location-less advisory)."""
-    if not isinstance(body, dict):
-        return
-    # MobSF findings carry their own severity (high/critical/warning/info/...).
-    # Wrapper objects (e.g. the top-level "findings" key) have NO severity, so
-    # they must never be emitted as findings.
-    raw_sev = body.get("severity") or body.get("metadata", {}).get("severity")
+def _emit_mobsf(rule_id, raw_sev, title, description, findings: list[dict]) -> None:
+    """Append one normalized MobSF finding (falls back to a location-less
+    advisory when no file/location is available)."""
     if not raw_sev:
         return
     sev = norm_sev(raw_sev)
-    title = body.get("metadata", {}).get("description") or body.get("description") or rule_id
-    files = body.get("files") or []
-    if files and isinstance(files, list):
-        for f in files:
-            findings.append(
-                {
-                    "tool": "mobsf",
-                    "rule": rule_id,
-                    "severity": sev,
-                    "title": str(title)[:240],
-                    "file": (f.get("file_path") if isinstance(f, dict) else str(f)) or "",
-                    "line": (f.get("match_lines", [None])[0] if isinstance(f, dict) else None),
-                }
-            )
-    else:
-        findings.append(
-            {
-                "tool": "mobsf",
-                "rule": rule_id,
-                "severity": sev,
-                "title": str(title)[:240],
-                "file": "",
-                "line": None,
-            }
-        )
+    findings.append(
+        {
+            "tool": "mobsf",
+            "rule": rule_id,
+            "severity": sev,
+            "title": str(title or rule_id)[:240],
+            "file": "",
+            "line": None,
+        }
+    )
 
 
 def parse_mobsf_report(path: Path) -> list[dict]:
+    """Parse a MobSF JSON report.
+
+    MobSF uses several *incompatible* shapes across report versions. We use
+    MobSF's own scored, deduplicated `appsec` block as the authoritative
+    source of findings (it already consolidates manifest/certificate/binary/
+    tracker/secrets results). For source-mode scans (where MobSF analyses
+    uncompiled source rather than a binary) the per-section buckets may hold
+    code findings not reflected in `appsec`, so we also pull
+    `code_analysis.findings`.
+
+    Non-finding collections (secrets=list[str], trackers count, permissions
+    dict, strings) are intentionally ignored.
+    """
     if not path.exists():
         return []
     try:
@@ -300,27 +282,33 @@ def parse_mobsf_report(path: Path) -> list[dict]:
         return []
 
     findings: list[dict] = []
+    if not isinstance(data, dict):
+        return findings
 
-    def collect(bucket: dict) -> None:
-        if not isinstance(bucket, dict):
-            return
-        # Some buckets nest findings under a "findings" sub-key.
-        inner = bucket.get("findings")
-        if isinstance(inner, dict):
-            bucket = inner
-        for rule_id, body in bucket.items():
-            if not isinstance(body, dict):
-                continue
-            # The leaf may itself wrap a "findings" dict (rare MobSF shape).
-            nested = body.get("findings")
-            if isinstance(nested, dict):
-                for rid, b in nested.items():
-                    _emit_mobsf(rid, b, findings)
-            else:
-                _emit_mobsf(rule_id, body, findings)
+    # 1) appsec — MobSF's own scored, severity-bucketed findings.
+    #    Buckets: high / warning / info / secure / hotspot.
+    appsec = data.get("appsec") or {}
+    if isinstance(appsec, dict):
+        for sev_bucket, items in appsec.items():
+            if sev_bucket in ("high", "warning", "info", "secure", "hotspot") and isinstance(items, list):
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    _emit_mobsf(
+                        it.get("section") or it.get("title") or sev_bucket,
+                        sev_bucket,                       # high/warning/info
+                        it.get("title"),
+                        it.get("description"),
+                        findings,
+                    )
 
-    for bucket in MOBSF_FINDING_BUCKETS:
-        collect(data.get(bucket))
+    # 2) code_analysis.findings — dict keyed by rule id (source-mode scans),
+    #    which `appsec` may not include.
+    ca = data.get("code_analysis") or {}
+    if isinstance(ca, dict):
+        for rid, body in (ca.get("findings") or {}).items():
+            if isinstance(body, dict):
+                _emit_mobsf(rid, body.get("severity"), body.get("title") or body.get("description"), body.get("description"), findings)
 
     return findings
 
