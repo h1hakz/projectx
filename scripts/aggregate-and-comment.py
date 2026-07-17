@@ -394,7 +394,7 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
     for tool, findings in sorted(by_tool.items()):
         if not findings:
             continue
-        findings = sorted(findings, key=lambda x: SEV_ORDER.index(x["severity"]))[:25]
+        findings = sorted(findings, key=lambda x: SEV_ORDER.index(x["severity"]))
         rows = ["", f"<details><summary><b>{tool_label(tool)}</b> — top {len(findings)} findings</summary>", "",
                 "| Severity | Rule | Title | Location |",
                 "|----------|------|-------|----------|"]
