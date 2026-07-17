@@ -23,7 +23,7 @@ public class RaspTestApplication extends Application implements ThreatListener.T
 
         ThreatListener threatListener = new ThreatListener(this);
         threatListener.registerListener(this);
-        Talsec.start(this, config);
+        // Talsec.start(this, config);  // INTENTIONALLY COMMENTED OUT TO TRIGGER RASP ISSUE
     }
 
     @Override
