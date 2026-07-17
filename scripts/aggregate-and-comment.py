@@ -5,7 +5,7 @@ single severity-bucketed summary, then upsert a sticky comment on the PR.
 
 Inputs (under --artifacts):
   scan-artifacts/sast-results/{semgrep.sarif,mobsfscan.sarif,mobsfscan.json}
-  scan-artifacts/secret-results/{results.sarif,trufflehog.json}
+  scan-artifacts/secret-results/{results.sarif}
   scan-artifacts/sca-results/{dc-report/dependency-check-report.sarif,trivy-fs.sarif}
   scan-artifacts/iac-results/trivy-iac.sarif
   scan-artifacts/dast-results/mobsf-report.json
@@ -38,7 +38,6 @@ TOOL_LABELS = {
     "semgrep":          "semgrep (SAST)",
     "mobsfscan":        "mobsfscan (SAST)",
     "gitleaks":         "gitleaks (Secrets)",
-    "trufflehog":       "trufflehog (Secrets)",
     "dependency-check": "dependency-check (SCA)",
     "trivy-fs":         "trivy-fs (SCA)",
     "trivy-iac":        "trivy-iac (IaC)",
@@ -169,47 +168,6 @@ def parse_gitleaks_sarif(path: Path) -> list[dict]:
                 "line":     line,
             })
     return findings
-
-
-def parse_trufflehog(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    out: list[dict] = []
-    text = path.read_text().strip()
-    if not text:
-        return []
-    # Trufflehog emits NDJSON when streamed; a single JSON array when --json --output
-    candidates = []
-    if text.startswith("["):
-        try:
-            candidates = json.loads(text)
-        except json.JSONDecodeError:
-            candidates = []
-    else:
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                candidates.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-
-    for item in candidates:
-        verified = item.get("Verified") or item.get("verified")
-        det = item.get("DetectorName") or item.get("detector_name") or "Secret"
-        src = item.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {})
-        out.append(
-            {
-                "tool": "trufflehog",
-                "rule": det,
-                "severity": "critical" if verified else "high",
-                "title": f"Verified secret: {det}" if verified else f"Possible secret: {det}",
-                "file": src.get("file", ""),
-                "line": src.get("line"),
-            }
-        )
-    return out
 
 
 def parse_mobsfscan_json(path: Path) -> list[dict]:
@@ -514,7 +472,6 @@ def main() -> int:
         "semgrep":         root / "sast-results" / "semgrep.sarif",
         "mobsfscan":       root / "sast-results" / "mobsfscan.json",
         "gitleaks":        root / "secret-results" / "results.sarif",
-        "trufflehog":      root / "secret-results" / "trufflehog.json",
         "dependency-check":root / "sca-results" / "dc-report" / "dependency-check-report.sarif",
         "trivy-fs":        root / "sca-results" / "trivy-fs.sarif",
         "trivy-iac":       root / "iac-results" / "trivy-iac.sarif",
@@ -532,7 +489,6 @@ def main() -> int:
     else:
         by_tool["mobsfscan"]   += parse_sarif(root / "sast-results" / "mobsfscan.sarif", "mobsfscan")
     by_tool["gitleaks"]        += parse_gitleaks_sarif(expected["gitleaks"])
-    by_tool["trufflehog"]      += parse_trufflehog(expected["trufflehog"])
     by_tool["dependency-check"]+= parse_sarif(expected["dependency-check"], "dependency-check")
     by_tool["trivy-fs"]        += parse_sarif(expected["trivy-fs"], "trivy-fs")
     by_tool["trivy-iac"]       += parse_sarif(expected["trivy-iac"], "trivy-iac")

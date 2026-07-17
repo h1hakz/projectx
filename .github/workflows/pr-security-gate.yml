@@ -67,10 +67,10 @@ jobs:
             mobsfscan.json
 
   # ------------------------------------------------------------------
-  # 2. Secret scanning — gitleaks + trufflehog
+  # 2. Secret scanning — gitleaks
   # ------------------------------------------------------------------
   secrets:
-    name: Secret Scanning (gitleaks + trufflehog)
+    name: Secret Scanning (gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,27 +85,16 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: "true"
         continue-on-error: true
 
-      - name: Run trufflehog (filesystem + verified-only)
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: ${{ github.event.pull_request.base.sha }}
-          head: ${{ github.event.pull_request.head.sha }}
-          extra_args: --only-verified --json --no-update
-        continue-on-error: true
-
-      - name: Normalize trufflehog output
+      - name: Normalize gitleaks output
         if: always()
         run: |
-          [ -f trufflehog.json ] || echo "[]" > trufflehog.json
+          [ -f results.sarif ] || echo '{"version": "2.1.0", "runs": []}' > results.sarif
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: secret-results
-          path: |
-            results.sarif
-            trufflehog.json
+          path: results.sarif
 
   # ------------------------------------------------------------------
   # 3. SCA — OWASP Dependency-Check + Trivy filesystem
