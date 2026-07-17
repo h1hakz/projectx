@@ -263,16 +263,13 @@ def _emit_mobsf(rule_id, raw_sev, title, description, findings: list[dict]) -> N
 def parse_mobsf_report(path: Path) -> list[dict]:
     """Parse a MobSF JSON report.
 
-    MobSF uses several *incompatible* shapes across report versions. We use
-    MobSF's own scored, deduplicated `appsec` block as the authoritative
-    source of findings (it already consolidates manifest/certificate/binary/
-    tracker/secrets results). For source-mode scans (where MobSF analyses
-    uncompiled source rather than a binary) the per-section buckets may hold
-    code findings not reflected in `appsec`, so we also pull
-    `code_analysis.findings`.
+    MobSF stores the actual findings in per-section buckets, each carrying its
+    OWN severity. We parse those (the authoritative line-items) rather than the
+    `appsec` scorecard block, which MobSF re-buckets/aggregates and does NOT
+    equal the real finding count.
 
     Non-finding collections (secrets=list[str], trackers count, permissions
-    dict, strings) are intentionally ignored.
+    dict, strings, appsec scorecard) are intentionally ignored.
     """
     if not path.exists():
         return []
@@ -285,30 +282,57 @@ def parse_mobsf_report(path: Path) -> list[dict]:
     if not isinstance(data, dict):
         return findings
 
-    # 1) appsec — MobSF's own scored, severity-bucketed findings.
-    #    Buckets: high / warning / info / secure / hotspot.
-    appsec = data.get("appsec") or {}
-    if isinstance(appsec, dict):
-        for sev_bucket, items in appsec.items():
-            if sev_bucket in ("high", "warning", "info", "secure", "hotspot") and isinstance(items, list):
-                for it in items:
-                    if not isinstance(it, dict):
-                        continue
-                    _emit_mobsf(
-                        it.get("section") or it.get("title") or sev_bucket,
-                        sev_bucket,                       # high/warning/info
-                        it.get("title"),
-                        it.get("description"),
-                        findings,
-                    )
+    # MobSF stores the actual findings in per-section buckets, each carrying its
+    # OWN severity. We parse those (the authoritative line-items) rather than the
+    # `appsec` scorecard block, which MobSF re-buckets/aggregates and does NOT
+    # equal the real finding count (e.g. it folds some `high` items into
+    # `warning` and adds a non-finding `hotspot` permission summary).
+    #
+    # Shapes differ by section:
+    #   manifest_analysis.manifest_findings -> [ {rule, title, severity, ...} ]
+    #   certificate_analysis.certificate_findings -> [ [severity, desc, name] ]
+    #   code_analysis.findings              -> {rule_id: {severity, ...}}  (source)
+    #   network_security.network_findings   -> {rule_id: {severity, ...}}
+    #   binary_analysis                     -> [ {severity, ...} ]
 
-    # 2) code_analysis.findings — dict keyed by rule id (source-mode scans),
-    #    which `appsec` may not include.
+    # 1) manifest_analysis.manifest_findings — list of finding dicts.
+    mf = (data.get("manifest_analysis") or {}).get("manifest_findings") or []
+    if isinstance(mf, list):
+        for it in mf:
+            if isinstance(it, dict):
+                _emit_mobsf(it.get("rule") or it.get("title"), it.get("severity"),
+                            it.get("title"), it.get("description"), findings)
+
+    # 2) certificate_analysis.certificate_findings — list of [sev, desc, name].
+    cf = (data.get("certificate_analysis") or {}).get("certificate_findings") or []
+    if isinstance(cf, list):
+        for it in cf:
+            if isinstance(it, list) and len(it) >= 2 and isinstance(it[0], str):
+                _emit_mobsf(it[2] if len(it) > 2 else it[1], it[0], it[1], it[1], findings)
+
+    # 3) code_analysis.findings — dict keyed by rule id (source-mode scans).
     ca = data.get("code_analysis") or {}
     if isinstance(ca, dict):
         for rid, body in (ca.get("findings") or {}).items():
             if isinstance(body, dict):
-                _emit_mobsf(rid, body.get("severity"), body.get("title") or body.get("description"), body.get("description"), findings)
+                _emit_mobsf(rid, body.get("severity"),
+                            body.get("title") or body.get("description"),
+                            body.get("description"), findings)
+
+    # 4) network_security.network_findings — dict keyed by rule id.
+    ns = (data.get("network_security") or {}).get("network_findings") or {}
+    if isinstance(ns, dict):
+        for rid, body in ns.items():
+            if isinstance(body, dict):
+                _emit_mobsf(rid, body.get("severity"),
+                            body.get("title") or body.get("description"),
+                            body.get("description"), findings)
+
+    # 5) binary_analysis — list of finding dicts.
+    for it in (data.get("binary_analysis") or []):
+        if isinstance(it, dict):
+            _emit_mobsf(it.get("rule") or it.get("title"), it.get("severity"),
+                        it.get("title"), it.get("description"), findings)
 
     return findings
 
