@@ -40,10 +40,8 @@ jobs:
           semgrep scan \
             --config p/security-audit \
             --config p/owasp-top-ten \
-            --config p/mobsf \
             --config configs/.semgrep.yml \
-            --sarif --output semgrep.sarif \
-            --error || true
+            --sarif --output semgrep.sarif
 
       - name: Run mobsfscan
         run: |
