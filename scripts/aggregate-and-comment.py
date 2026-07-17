@@ -31,6 +31,25 @@ import requests
 MARKER = "<!-- mobile-secgate -->"
 SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 
+# Human-readable label per tool, annotated with the scan category so reviewers
+# understand what each row means (SAST vs DAST vs SCA vs secrets vs IaC vs RASP).
+TOOL_LABELS = {
+    "semgrep":          "semgrep (SAST)",
+    "mobsfscan":        "mobsfscan (SAST)",
+    "gitleaks":         "gitleaks (Secrets)",
+    "trufflehog":       "trufflehog (Secrets)",
+    "dependency-check": "dependency-check (SCA)",
+    "trivy-fs":         "trivy-fs (SCA)",
+    "trivy-iac":        "trivy-iac (IaC)",
+    "mobsf":            "mobsf (DAST)",
+    "rasp-check":       "rasp-check (RASP)",
+}
+
+
+def tool_label(tool: str) -> str:
+    """Return the category-annotated display label for a tool."""
+    return TOOL_LABELS.get(tool, tool)
+
 
 # ---------------------------------------------------------------------------
 # Severity normalization
@@ -58,6 +77,29 @@ def sarif_rule_sev(rule: dict) -> str:
 # ---------------------------------------------------------------------------
 # Parsers — each returns list[dict(tool, severity, title, file, line, url)]
 # ---------------------------------------------------------------------------
+def cvss_to_sev(value) -> str:
+    """Map a numeric security-severity (0.0-10.0) to our bucket."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if v >= 9.0:
+        return "critical"
+    if v >= 7.0:
+        return "high"
+    if v >= 4.0:
+        return "medium"
+    if v > 0.0:
+        return "low"
+    return "info"
+
+
+def sarif_rule_sev(rule: dict) -> str:
+    props = (rule or {}).get("properties") or {}
+    sev = cvss_to_sev(props.get("security-severity")) or norm_sev(props.get("security-severity") or props.get("severity"))
+    return sev
+
+
 def parse_sarif(path: Path, tool: str) -> list[dict]:
     findings: list[dict] = []
     if not path.exists():
@@ -73,9 +115,13 @@ def parse_sarif(path: Path, tool: str) -> list[dict]:
             rule_id = res.get("ruleId", "")
             rule = rules.get(rule_id, {})
 
-            sev = norm_sev(res.get("level"))
+            # Prefer the rule's numeric security-severity (e.g. semgrep 9.0/8.5)
+            # so ERROR rules map to critical/high instead of collapsing to "high".
+            sev = sarif_rule_sev(rule)
             if sev == "info":
-                sev = sarif_rule_sev(rule)
+                sev = norm_sev(res.get("level"))
+                if sev == "info":
+                    sev = sarif_rule_sev(rule)
 
             msg = (res.get("message") or {}).get("text") or rule.get("shortDescription", {}).get("text") or rule_id
             loc = (res.get("locations") or [{}])[0].get("physicalLocation", {}) or {}
@@ -215,7 +261,35 @@ def parse_mobsfscan_json(path: Path) -> list[dict]:
     return findings
 
 
+def _emit_mobsf(rule_id, raw_sev, title, description, findings: list[dict]) -> None:
+    """Append one normalized MobSF finding (falls back to a location-less
+    advisory when no file/location is available)."""
+    if not raw_sev:
+        return
+    sev = norm_sev(raw_sev)
+    findings.append(
+        {
+            "tool": "mobsf",
+            "rule": rule_id,
+            "severity": sev,
+            "title": str(title or rule_id)[:240],
+            "file": "",
+            "line": None,
+        }
+    )
+
+
 def parse_mobsf_report(path: Path) -> list[dict]:
+    """Parse a MobSF JSON report.
+
+    MobSF stores the actual findings in per-section buckets, each carrying its
+    OWN severity. We parse those (the authoritative line-items) rather than the
+    `appsec` scorecard block, which MobSF re-buckets/aggregates and does NOT
+    equal the real finding count.
+
+    Non-finding collections (secrets=list[str], trackers count, permissions
+    dict, strings, appsec scorecard) are intentionally ignored.
+    """
     if not path.exists():
         return []
     try:
@@ -224,43 +298,66 @@ def parse_mobsf_report(path: Path) -> list[dict]:
         return []
 
     findings: list[dict] = []
+    if not isinstance(data, dict):
+        return findings
 
-    # MobSF lumps findings under several keys depending on platform/version.
-    for bucket in ("code_analysis", "manifest_analysis", "permissions",
-                   "binary_analysis", "network_security", "secrets"):
-        section = data.get(bucket) or {}
-        if isinstance(section, dict):
-            findings_dict = section.get("findings") or section
-            for rule_id, body in findings_dict.items() if isinstance(findings_dict, dict) else []:
-                if not isinstance(body, dict):
-                    continue
-                sev = norm_sev(body.get("severity") or body.get("metadata", {}).get("severity"))
-                title = body.get("metadata", {}).get("description") or body.get("description") or rule_id
-                files = body.get("files") or []
-                if files and isinstance(files, list):
-                    for f in files:
-                        findings.append(
-                            {
-                                "tool": "mobsf",
-                                "rule": rule_id,
-                                "severity": sev,
-                                "title": str(title)[:240],
-                                "file": (f.get("file_path") if isinstance(f, dict) else str(f)) or "",
-                                "line": (f.get("match_lines", [None])[0] if isinstance(f, dict) else None),
-                            }
-                        )
-                else:
-                    findings.append(
-                        {
-                            "tool": "mobsf",
-                            "rule": rule_id,
-                            "severity": sev,
-                            "title": str(title)[:240],
-                            "file": "",
-                            "line": None,
-                        }
-                    )
+    # MobSF stores the actual findings in per-section buckets, each carrying its
+    # OWN severity. We parse those (the authoritative line-items) rather than the
+    # `appsec` scorecard block, which MobSF re-buckets/aggregates and does NOT
+    # equal the real finding count (e.g. it folds some `high` items into
+    # `warning` and adds a non-finding `hotspot` permission summary).
+    #
+    # Shapes differ by section:
+    #   manifest_analysis.manifest_findings -> [ {rule, title, severity, ...} ]
+    #   certificate_analysis.certificate_findings -> [ [severity, desc, name] ]
+    #   code_analysis.findings              -> {rule_id: {severity, ...}}  (source)
+    #   network_security.network_findings   -> {rule_id: {severity, ...}}
+    #   binary_analysis                     -> [ {severity, ...} ]
+
+    # 1) manifest_analysis.manifest_findings — list of finding dicts.
+    mf = (data.get("manifest_analysis") or {}).get("manifest_findings") or []
+    if isinstance(mf, list):
+        for it in mf:
+            if isinstance(it, dict):
+                _emit_mobsf(it.get("rule") or it.get("title"), it.get("severity"),
+                            it.get("title"), it.get("description"), findings)
+
+    # 2) certificate_analysis.certificate_findings — list of [sev, desc, name].
+    cf = (data.get("certificate_analysis") or {}).get("certificate_findings") or []
+    if isinstance(cf, list):
+        for it in cf:
+            if isinstance(it, list) and len(it) >= 2 and isinstance(it[0], str):
+                _emit_mobsf(it[2] if len(it) > 2 else it[1], it[0], it[1], it[1], findings)
+
+    # 3) code_analysis.findings — dict keyed by rule id (source-mode scans).
+    ca = data.get("code_analysis") or {}
+    if isinstance(ca, dict):
+        for rid, body in (ca.get("findings") or {}).items():
+            if isinstance(body, dict):
+                _emit_mobsf(rid, body.get("severity"),
+                            body.get("title") or body.get("description"),
+                            body.get("description"), findings)
+
+    # 4) network_security.network_findings — dict keyed by rule id.
+    ns = (data.get("network_security") or {}).get("network_findings") or {}
+    if isinstance(ns, dict):
+        for rid, body in ns.items():
+            if isinstance(body, dict):
+                _emit_mobsf(rid, body.get("severity"),
+                            body.get("title") or body.get("description"),
+                            body.get("description"), findings)
+
+    # 5) binary_analysis — list of finding dicts.
+    for it in (data.get("binary_analysis") or []):
+        if isinstance(it, dict):
+            _emit_mobsf(it.get("rule") or it.get("title"), it.get("severity"),
+                        it.get("title"), it.get("description"), findings)
+
     return findings
+
+
+# RASP issues that are diagnostic/skip notices, not actual security findings.
+RASP_SKIP_IDS = {"RASP_PLATFORM_UNKNOWN"}
 
 
 def parse_rasp(path: Path) -> list[dict]:
@@ -272,10 +369,16 @@ def parse_rasp(path: Path) -> list[dict]:
         return []
     out = []
     for issue in data.get("issues", []):
+        rid = issue.get("id", "RASP_MISSING")
+        # Skip-diagnostic notices (e.g. no iOS/Android layout detected) are not
+        # findings — they're surfaced separately so they don't pollute the
+        # severity counts or look like a passed/failed RASP check.
+        if rid in RASP_SKIP_IDS:
+            continue
         out.append(
             {
                 "tool": "rasp-check",
-                "rule": issue.get("id", "RASP_MISSING"),
+                "rule": rid,
                 "severity": norm_sev(issue.get("severity", "high")),
                 "title": issue.get("message", "freeRASP integration missing"),
                 "file": issue.get("file", ""),
@@ -285,10 +388,25 @@ def parse_rasp(path: Path) -> list[dict]:
     return out
 
 
+def parse_rasp_skips(path: Path) -> list[str]:
+    """Return human-readable RASP skip/diagnostic notices (not findings)."""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return []
+    return [
+        issue.get("message", issue.get("id", ""))
+        for issue in data.get("issues", [])
+        if issue.get("id") in RASP_SKIP_IDS
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Comment rendering
 # ---------------------------------------------------------------------------
-def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int]) -> str:
+def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missing: set[str] | None = None, skips: list[str] | None = None) -> str:
     badge = lambda n, s: f"![{s}](https://img.shields.io/badge/{s.title()}-{n}-{COLOR[s]})"
 
     head = [
@@ -303,7 +421,7 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int]) -> st
     for tool, findings in sorted(by_tool.items()):
         c = Counter(f["severity"] for f in findings)
         head.append(
-            f"| `{tool}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} |"
+            f"| `{tool_label(tool)}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} |"
         )
 
     parts = ["\n".join(head), ""]
@@ -312,7 +430,7 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int]) -> st
         if not findings:
             continue
         findings = sorted(findings, key=lambda x: SEV_ORDER.index(x["severity"]))[:25]
-        rows = ["", f"<details><summary><b>{tool}</b> — top {len(findings)} findings</summary>", "",
+        rows = ["", f"<details><summary><b>{tool_label(tool)}</b> — top {len(findings)} findings</summary>", "",
                 "| Severity | Rule | Title | Location |",
                 "|----------|------|-------|----------|"]
         for f in findings:
@@ -323,6 +441,22 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int]) -> st
 
     gate = "merge **BLOCKED** — fix Critical/High findings" if (totals.get("critical", 0) + totals.get("high", 0)) else "gate **GREEN** — no Critical/High findings"
     parts.append(f"\n> {gate}")
+
+    # Surface scans whose artifact is missing so a silent "0 findings" from a
+    # failed/never-ran job is visible instead of being mistaken for a clean pass.
+    if missing:
+        parts.append("")
+        parts.append("> ⚠️ **Scan output missing** (job may have failed/skipped — counts above may be under-reported): "
+                     + ", ".join(f"`{m}`" for m in sorted(missing)))
+
+    # Diagnostic/skip notices (e.g. no iOS/Android layout detected) — these are
+    # NOT findings, so show them separately rather than in the severity table.
+    if skips:
+        parts.append("")
+        parts.append("> ℹ️ **Checks not performed** (not blocking):")
+        for s in skips:
+            parts.append(f"> · {s}")
+
     return "\n".join(parts)
 
 
@@ -366,20 +500,37 @@ def main() -> int:
     root = args.artifacts
     by_tool: dict[str, list[dict]] = defaultdict(list)
 
-    by_tool["semgrep"]         += parse_sarif(root / "sast-results" / "semgrep.sarif", "semgrep")
+    # Track expected scan artifacts; flag any that are absent so a never-ran /
+    # failed job (e.g. MobSF container didn't boot) shows in the comment instead
+    # of being silently counted as "0 findings".
+    expected = {
+        "semgrep":         root / "sast-results" / "semgrep.sarif",
+        "mobsfscan":       root / "sast-results" / "mobsfscan.json",
+        "gitleaks":        root / "secret-results" / "results.sarif",
+        "trufflehog":      root / "secret-results" / "trufflehog.json",
+        "dependency-check":root / "sca-results" / "dc-report" / "dependency-check-report.sarif",
+        "trivy-fs":        root / "sca-results" / "trivy-fs.sarif",
+        "trivy-iac":       root / "iac-results" / "trivy-iac.sarif",
+        "mobsf":           root / "dast-results" / "mobsf-report.json",
+        "rasp-check":      root / "rasp-results" / "rasp-report.json",
+    }
+    missing = {name for name, p in expected.items() if not p.exists()}
+
+    by_tool["semgrep"]         += parse_sarif(expected["semgrep"], "semgrep")
     # mobsfscan: prefer JSON (carries severity); fall back to SARIF if JSON missing
-    mobsfscan_json = root / "sast-results" / "mobsfscan.json"
+    mobsfscan_json = expected["mobsfscan"]
     if mobsfscan_json.exists():
         by_tool["mobsfscan"]   += parse_mobsfscan_json(mobsfscan_json)
     else:
         by_tool["mobsfscan"]   += parse_sarif(root / "sast-results" / "mobsfscan.sarif", "mobsfscan")
-    by_tool["gitleaks"]        += parse_gitleaks_sarif(root / "secret-results" / "results.sarif")
-    by_tool["trufflehog"]      += parse_trufflehog(root / "secret-results" / "trufflehog.json")
-    by_tool["dependency-check"]+= parse_sarif(root / "sca-results" / "dc-report" / "dependency-check-report.sarif", "dependency-check")
-    by_tool["trivy-fs"]        += parse_sarif(root / "sca-results" / "trivy-fs.sarif", "trivy-fs")
-    by_tool["trivy-iac"]       += parse_sarif(root / "iac-results" / "trivy-iac.sarif", "trivy-iac")
-    by_tool["mobsf"]           += parse_mobsf_report(root / "dast-results" / "mobsf-report.json")
-    by_tool["rasp-check"]      += parse_rasp(root / "rasp-results" / "rasp-report.json")
+    by_tool["gitleaks"]        += parse_gitleaks_sarif(expected["gitleaks"])
+    by_tool["trufflehog"]      += parse_trufflehog(expected["trufflehog"])
+    by_tool["dependency-check"]+= parse_sarif(expected["dependency-check"], "dependency-check")
+    by_tool["trivy-fs"]        += parse_sarif(expected["trivy-fs"], "trivy-fs")
+    by_tool["trivy-iac"]       += parse_sarif(expected["trivy-iac"], "trivy-iac")
+    by_tool["mobsf"]           += parse_mobsf_report(expected["mobsf"])
+    by_tool["rasp-check"]      += parse_rasp(expected["rasp-check"])
+    rasp_skips = parse_rasp_skips(expected["rasp-check"])
 
     totals = Counter()
     for findings in by_tool.values():
@@ -389,10 +540,12 @@ def main() -> int:
         "totals":  dict(totals),
         "by_tool": {t: Counter(f["severity"] for f in fs) for t, fs in by_tool.items()},
         "findings_count": sum(len(fs) for fs in by_tool.values()),
+        "missing_artifacts": sorted(missing),
+        "skipped_checks": rasp_skips,
     }
     args.summary.write_text(json.dumps(summary, indent=2, default=int))
 
-    body = render_comment(by_tool, totals)
+    body = render_comment(by_tool, totals, missing, rasp_skips)
     token = os.environ.get("GITHUB_TOKEN")
     pr    = os.environ.get("PR_NUMBER")
     repo  = os.environ.get("REPO")
