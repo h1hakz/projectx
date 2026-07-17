@@ -1,0 +1,34 @@
+# Vulnerable Kubernetes deployment for IaC (Trivy) demo
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-app
+  labels:
+    app: vulnerable
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable
+  template:
+    metadata:
+      labels:
+        app: vulnerable
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: app
+        image: vulnerable-app:latest
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /
