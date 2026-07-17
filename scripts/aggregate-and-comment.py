@@ -10,6 +10,7 @@ Inputs (under --artifacts):
   scan-artifacts/iac-results/trivy-iac.sarif
   scan-artifacts/dast-results/mobsf-report.json
   scan-artifacts/rasp-results/rasp-report.json
+  scan-artifacts/sbom-results/sbom.cdx.json
 
 Output:
   summary.json   — machine-readable totals consumed by severity-gate.py
@@ -513,6 +514,7 @@ def main() -> int:
         "trivy-iac":       root / "iac-results" / "trivy-iac.sarif",
         "mobsf":           root / "dast-results" / "mobsf-report.json",
         "rasp-check":      root / "rasp-results" / "rasp-report.json",
+        "sbom":            root / "sbom-results" / "sbom.cdx.json",
     }
     missing = {name for name, p in expected.items() if not p.exists()}
 
@@ -532,6 +534,16 @@ def main() -> int:
     by_tool["rasp-check"]      += parse_rasp(expected["rasp-check"])
     rasp_skips = parse_rasp_skips(expected["rasp-check"])
 
+    # SBOM component count (CycloneDX). Not a finding — just an inventory metric
+    # so a missing/empty SBOM is visible in the summary instead of being silent.
+    sbom_path = expected["sbom"]
+    sbom_components = 0
+    if sbom_path.exists():
+        try:
+            sbom_components = len(json.loads(sbom_path.read_text()).get("components", []) or [])
+        except (json.JSONDecodeError, ValueError):
+            sbom_components = -1
+
     totals = Counter()
     for findings in by_tool.values():
         totals.update(f["severity"] for f in findings)
@@ -542,6 +554,7 @@ def main() -> int:
         "findings_count": sum(len(fs) for fs in by_tool.values()),
         "missing_artifacts": sorted(missing),
         "skipped_checks": rasp_skips,
+        "sbom_components": sbom_components,
     }
     args.summary.write_text(json.dumps(summary, indent=2, default=int))
 

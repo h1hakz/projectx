@@ -181,7 +181,39 @@ jobs:
         with: { name: iac-results, path: trivy-iac.sarif }
 
   # ------------------------------------------------------------------
-  # 5. DAST — MobSF binary analysis via REST API
+  # 5. SBOM — CycloneDX manifest via Syft (iOS + Android dep graphs)
+  # ------------------------------------------------------------------
+  sbom:
+    name: SBOM (CycloneDX / Syft)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          upload-artifact: false
+
+      - name: Validate SBOM
+        run: |
+          python - <<'PY'
+          import json, sys
+          d = json.load(open("sbom.cdx.json"))
+          assert d.get("bomFormat") == "CycloneDX", "not a CycloneDX document"
+          n = len(d.get("components", []))
+          print(f"SBOM OK: bomFormat={d.get('bomFormat')} specVersion={d.get('specVersion')} components={n}")
+          if n == 0:
+              print("::warning::SBOM generated but contains 0 components")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: sbom-results, path: sbom.cdx.json }
+
+  # ------------------------------------------------------------------
+  # 6. DAST — MobSF binary analysis via REST API
   #    Only runs when a mobile BINARY (.apk / .ipa) is present in the PR.
   #    Source-only PRs skip the slow (~6 min) MobSF container entirely and
   #    rely on mobsfscan (SAST) + semgrep for source coverage.
@@ -273,7 +305,7 @@ jobs:
           if-no-files-found: ignore
 
   # ------------------------------------------------------------------
-  # 6. RASP integration check — confirm freeRASP wired into the app
+  # 7. RASP integration check — confirm freeRASP wired into the app
   # ------------------------------------------------------------------
   rasp:
     name: RASP integration check (freeRASP)
@@ -294,11 +326,11 @@ jobs:
         with: { name: rasp-results, path: rasp-report.json }
 
   # ------------------------------------------------------------------
-  # 7. Aggregate + sticky PR comment + Critical/High gate
+  # 8. Aggregate + sticky PR comment + Critical/High gate
   # ------------------------------------------------------------------
   gate:
     name: Severity Gate + PR Comment
-    needs: [sast, secrets, sca, iac, dast, rasp]
+    needs: [sast, secrets, sca, iac, sbom, dast, rasp]
     if: always()
     runs-on: ubuntu-latest
     steps:
