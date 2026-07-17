@@ -31,6 +31,25 @@ import requests
 MARKER = "<!-- mobile-secgate -->"
 SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 
+# Human-readable label per tool, annotated with the scan category so reviewers
+# understand what each row means (SAST vs DAST vs SCA vs secrets vs IaC vs RASP).
+TOOL_LABELS = {
+    "semgrep":          "semgrep (SAST)",
+    "mobsfscan":        "mobsfscan (SAST)",
+    "gitleaks":         "gitleaks (Secrets)",
+    "trufflehog":       "trufflehog (Secrets)",
+    "dependency-check": "dependency-check (SCA)",
+    "trivy-fs":         "trivy-fs (SCA)",
+    "trivy-iac":        "trivy-iac (IaC)",
+    "mobsf":            "mobsf (DAST)",
+    "rasp-check":       "rasp-check (RASP)",
+}
+
+
+def tool_label(tool: str) -> str:
+    """Return the category-annotated display label for a tool."""
+    return TOOL_LABELS.get(tool, tool)
+
 
 # ---------------------------------------------------------------------------
 # Severity normalization
@@ -402,7 +421,7 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
     for tool, findings in sorted(by_tool.items()):
         c = Counter(f["severity"] for f in findings)
         head.append(
-            f"| `{tool}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} |"
+            f"| `{tool_label(tool)}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} |"
         )
 
     parts = ["\n".join(head), ""]
@@ -411,7 +430,7 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
         if not findings:
             continue
         findings = sorted(findings, key=lambda x: SEV_ORDER.index(x["severity"]))[:25]
-        rows = ["", f"<details><summary><b>{tool}</b> — top {len(findings)} findings</summary>", "",
+        rows = ["", f"<details><summary><b>{tool_label(tool)}</b> — top {len(findings)} findings</summary>", "",
                 "| Severity | Rule | Title | Location |",
                 "|----------|------|-------|----------|"]
         for f in findings:

@@ -181,14 +181,16 @@ jobs:
         with: { name: iac-results, path: trivy-iac.sarif }
 
   # ------------------------------------------------------------------
-  # 5. DAST — MobSF static analysis via REST API
-  #    GitHub Actions' `services:` block declares the container init
-  #    failed before MobSF finished its Django migrations + Gunicorn
-  #    startup (~90s). We `docker run -d` manually instead and wait
-  #    from the host, which is what works in practice for slow-booting
-  #    service images. A workshop-fixed MOBSF_API_KEY is used by both
-  #    the container and the curl steps; override via repo secret for
-  #    real engagements.
+  # 5. DAST — MobSF binary analysis via REST API
+  #    Only runs when a mobile BINARY (.apk / .ipa) is present in the PR.
+  #    Source-only PRs skip the slow (~6 min) MobSF container entirely and
+  #    rely on mobsfscan (SAST) + semgrep for source coverage.
+  #
+  #    GitHub Actions' `services:` block init fails before MobSF finishes its
+  #    Django migrations + Gunicorn startup (~90s). We `docker run -d` manually
+  #    and wait from the host, which works in practice for slow-booting images.
+  #    A workshop-fixed MOBSF_API_KEY is used by both the container and the curl
+  #    steps; override via repo secret for real engagements.
   # ------------------------------------------------------------------
   dast:
     name: DAST (MobSF)
@@ -198,28 +200,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start MobSF container
-        run: |
-          docker run -d --name mobsf -p 8000:8000 \
-            -e MOBSF_API_KEY="${MOBSF_API_KEY}" \
-            opensecurity/mobile-security-framework-mobsf:latest
-
-      - name: Detect mobile artifact (ipa/apk/zip-of-source)
+      - name: Detect mobile binary (ipa/apk)
         id: pkg
         run: |
           shopt -s nullglob globstar
           ipa=( **/*.ipa ); apk=( **/*.apk )
           if (( ${#ipa[@]} )); then
             echo "file=${ipa[0]}" >> $GITHUB_OUTPUT
+            echo "has_binary=true" >> $GITHUB_OUTPUT
+            echo "Found iOS binary: ${ipa[0]}"
           elif (( ${#apk[@]} )); then
             echo "file=${apk[0]}" >> $GITHUB_OUTPUT
+            echo "has_binary=true" >> $GITHUB_OUTPUT
+            echo "Found Android binary: ${apk[0]}"
           else
-            # source-only PR — zip the source so MobSF static scan runs on it
-            zip -qr source.zip . -x "*.git*" -x "node_modules/*" -x "Pods/*"
-            echo "file=source.zip" >> $GITHUB_OUTPUT
+            echo "has_binary=false" >> $GITHUB_OUTPUT
+            echo "No .apk/.ipa found — skipping MobSF DAST (source-only PR)."
+            echo "::notice title=DAST skipped::No mobile binary (.apk/.ipa) in this PR; MobSF DAST skipped. Source is covered by mobsfscan (SAST) + semgrep."
           fi
 
+      - name: Start MobSF container
+        if: steps.pkg.outputs.has_binary == 'true'
+        run: |
+          docker run -d --name mobsf -p 8000:8000 \
+            -e MOBSF_API_KEY="${MOBSF_API_KEY}" \
+            opensecurity/mobile-security-framework-mobsf:latest
+
       - name: Wait for MobSF to be ready (up to 6 min)
+        if: steps.pkg.outputs.has_binary == 'true'
         run: |
           for i in {1..72}; do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000 || echo 000)
@@ -235,7 +243,7 @@ jobs:
         continue-on-error: true
 
       - name: MobSF upload + scan + report
-        if: success()
+        if: steps.pkg.outputs.has_binary == 'true'
         env:
           MOBSF: http://localhost:8000
           FILE:  ${{ steps.pkg.outputs.file }}
@@ -249,6 +257,7 @@ jobs:
           curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${MOBSF_API_KEY}" ${MOBSF}/api/v1/report_json -o mobsf-report.json
           curl -sf -X POST -d "hash=${HASH}" -H "Authorization: ${MOBSF_API_KEY}" ${MOBSF}/api/v1/report_pdf  -o mobsf-report.pdf || true
         continue-on-error: true
+
 
       - name: Stop MobSF container
         if: always()
