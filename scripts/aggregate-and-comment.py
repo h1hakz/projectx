@@ -412,13 +412,16 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
         parts.append(f"> 📦 **SBOM**: {len(sbom_components)} components")
         if sbom_components:
             rows = ["", "<details><summary><b>SBOM components</b></summary>", "",
-                    "| Name | Version | PURL |",
-                    "|------|---------|------|"]
+                    "| Name | Version | License | PURL |",
+                    "|------|---------|---------|------|"]
             for c in sbom_components[:50]:
                 name = c.get("name", "—")
                 version = c.get("version", "—")
                 purl = c.get("purl", "—")
-                rows.append(f"| `{name}` | `{version}` | `{purl}` |")
+                license_info = c.get("licenses") or "—"
+                if isinstance(license_info, list):
+                    license_info = ", ".join(l.get("license", {}).get("name", str(l)) if isinstance(l, dict) else str(l) for l in license_info)
+                rows.append(f"| `{name}` | `{version}` | `{license_info}` | `{purl}` |")
             rows.append("\n</details>")
             parts.append("\n".join(rows))
 
