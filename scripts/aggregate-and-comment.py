@@ -431,24 +431,6 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
     gate = "merge **BLOCKED** — fix Critical/High findings" if (totals.get("critical", 0) + totals.get("high", 0)) else "gate **GREEN** — no Critical/High findings"
     parts.append(f"\n> {gate}")
 
-    if sbom_components is not None:
-        parts.append("")
-        parts.append(f"> 📦 **SBOM**: {len(sbom_components)} components")
-        if sbom_components:
-            rows = ["", "<details><summary><b>SBOM components</b></summary>", "",
-                    "| Name | Version | License | PURL |",
-                    "|------|---------|---------|------|"]
-            for c in sbom_components[:50]:
-                name = c.get("name", "—")
-                version = c.get("version", "—")
-                purl = c.get("purl", "—")
-                license_info = c.get("licenses") or "—"
-                if isinstance(license_info, list):
-                    license_info = ", ".join(l.get("license", {}).get("name", str(l)) if isinstance(l, dict) else str(l) for l in license_info)
-                rows.append(f"| `{name}` | `{version}` | `{license_info}` | `{purl}` |")
-            rows.append("\n</details>")
-            parts.append("\n".join(rows))
-
     # Surface scans whose artifact is missing so a silent "0 findings" from a
     # failed/never-ran job is visible instead of being mistaken for a clean pass.
     if missing:
