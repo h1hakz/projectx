@@ -167,20 +167,19 @@ jobs:
         with: { name: iac-results, path: trivy-iac.sarif }
 
   # ------------------------------------------------------------------
-  # 5. SBOM — CycloneDX manifest via Syft (iOS + Android dep graphs)
+  # 5. SBOM — CycloneDX manifest via cdxgen
   # ------------------------------------------------------------------
   sbom:
-    name: SBOM (CycloneDX / Syft)
+    name: SBOM (CycloneDX / cdxgen)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install cdxgen
+        run: npm install -g @cyclonedx/cdxgen --omit=optional --ignore-scripts --min-release-age=2
+
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          format: cyclonedx-json
-          output-file: sbom.cdx.json
-          upload-artifact: false
+        run: cdxgen -o sbom.cdx.json .
 
       - name: Validate SBOM
         run: |

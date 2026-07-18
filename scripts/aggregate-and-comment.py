@@ -365,7 +365,7 @@ def parse_rasp_skips(path: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 # Comment rendering
 # ---------------------------------------------------------------------------
-def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missing: set[str] | None = None, skips: list[str] | None = None) -> str:
+def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missing: set[str] | None = None, skips: list[str] | None = None, sbom_components: list[dict] | None = None) -> str:
     badge = lambda n, s: f"![{s}](https://img.shields.io/badge/{s.title()}-{n}-{COLOR[s]})"
 
     head = [
@@ -406,6 +406,21 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
 
     gate = "merge **BLOCKED** — fix Critical/High findings" if (totals.get("critical", 0) + totals.get("high", 0)) else "gate **GREEN** — no Critical/High findings"
     parts.append(f"\n> {gate}")
+
+    if sbom_components is not None:
+        parts.append("")
+        parts.append(f"> 📦 **SBOM**: {len(sbom_components)} components")
+        if sbom_components:
+            rows = ["", "<details><summary><b>SBOM components</b></summary>", "",
+                    "| Name | Version | PURL |",
+                    "|------|---------|------|"]
+            for c in sbom_components[:50]:
+                name = c.get("name", "—")
+                version = c.get("version", "—")
+                purl = c.get("purl", "—")
+                rows.append(f"| `{name}` | `{version}` | `{purl}` |")
+            rows.append("\n</details>")
+            parts.append("\n".join(rows))
 
     # Surface scans whose artifact is missing so a silent "0 findings" from a
     # failed/never-ran job is visible instead of being mistaken for a clean pass.
@@ -500,9 +515,12 @@ def main() -> int:
     # so a missing/empty SBOM is visible in the summary instead of being silent.
     sbom_path = expected["sbom"]
     sbom_components = 0
+    sbom_component_list = []
     if sbom_path.exists():
         try:
-            sbom_components = len(json.loads(sbom_path.read_text()).get("components", []) or [])
+            sbom_data = json.loads(sbom_path.read_text())
+            sbom_components = len(sbom_data.get("components", []) or [])
+            sbom_component_list = sbom_data.get("components", []) or []
         except (json.JSONDecodeError, ValueError):
             sbom_components = -1
 
@@ -520,7 +538,7 @@ def main() -> int:
     }
     args.summary.write_text(json.dumps(summary, indent=2, default=int))
 
-    body = render_comment(by_tool, totals, missing, rasp_skips)
+    body = render_comment(by_tool, totals, missing, rasp_skips, sbom_component_list)
     token = os.environ.get("GITHUB_TOKEN")
     pr    = os.environ.get("PR_NUMBER")
     repo  = os.environ.get("REPO")
