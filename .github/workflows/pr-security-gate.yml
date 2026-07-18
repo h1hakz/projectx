@@ -52,11 +52,11 @@ jobs:
 
       - name: Upload SARIF (semgrep)
         uses: github/codeql-action/upload-sarif@v3
-        with: { sarif_file: semgrep.sarif, category: semgrep }
+        with: { sarif_file: semgrep.sarif, category: pr-semgrep }
 
       - name: Upload SARIF (mobsfscan)
         uses: github/codeql-action/upload-sarif@v3
-        with: { sarif_file: mobsfscan.sarif, category: mobsfscan }
+        with: { sarif_file: mobsfscan.sarif, category: pr-mobsfscan }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -141,10 +141,10 @@ jobs:
         continue-on-error: true
 
       - uses: github/codeql-action/upload-sarif@v3
-        with: { sarif_file: dc-report/dependency-check-report.sarif, category: dependency-check }
+        with: { sarif_file: dc-report/dependency-check-report.sarif, category: pr-dependency-check }
         continue-on-error: true
       - uses: github/codeql-action/upload-sarif@v3
-        with: { sarif_file: trivy-fs.sarif, category: trivy-fs }
+        with: { sarif_file: trivy-fs.sarif, category: pr-trivy-fs }
         continue-on-error: true
 
       - uses: actions/upload-artifact@v4
@@ -175,7 +175,7 @@ jobs:
           trivy-config: configs/trivy.yaml
 
       - uses: github/codeql-action/upload-sarif@v3
-        with: { sarif_file: trivy-iac.sarif, category: trivy-iac }
+        with: { sarif_file: trivy-iac.sarif, category: pr-trivy-iac }
 
       - uses: actions/upload-artifact@v4
         with: { name: iac-results, path: trivy-iac.sarif }
