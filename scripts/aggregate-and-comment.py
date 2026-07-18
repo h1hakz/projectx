@@ -43,6 +43,7 @@ TOOL_LABELS = {
     "trivy-iac":        "trivy-iac (IaC)",
     "mobsf":            "mobsf (DAST)",
     "rasp-check":       "rasp-check (RASP)",
+    "sbom-license":     "sbom-license (Compliance)",
 }
 
 
@@ -362,6 +363,29 @@ def parse_rasp_skips(path: Path) -> list[str]:
     ]
 
 
+def parse_sbom_licenses(path: Path) -> list[dict]:
+    """Parse check-sbom-licenses.py output into standard finding dicts."""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    findings: list[dict] = []
+    for item in data:
+        findings.append({
+            "tool": item.get("tool", "sbom-license"),
+            "rule": item.get("rule", "license-policy"),
+            "severity": norm_sev(item.get("severity", "high")),
+            "title": item.get("title", "License compliance issue"),
+            "file": item.get("file", ""),
+            "line": item.get("line"),
+        })
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # Comment rendering
 # ---------------------------------------------------------------------------
@@ -496,6 +520,7 @@ def main() -> int:
         "mobsf":           root / "dast-results" / "mobsf-report.json",
         "rasp-check":      root / "rasp-results" / "rasp-report.json",
         "sbom":            root / "sbom-results" / "sbom.cdx.json",
+        "sbom-license":    root / "sbom-results" / "sbom-license-results.json",
     }
     missing = {name for name, p in expected.items() if not p.exists()}
 
@@ -512,6 +537,7 @@ def main() -> int:
     by_tool["trivy-iac"]       += parse_sarif(expected["trivy-iac"], "trivy-iac")
     by_tool["mobsf"]           += parse_mobsf_report(expected["mobsf"])
     by_tool["rasp-check"]      += parse_rasp(expected["rasp-check"])
+    by_tool["sbom-license"]    += parse_sbom_licenses(expected["sbom-license"])
     rasp_skips = parse_rasp_skips(expected["rasp-check"])
 
     # SBOM component count (CycloneDX). Not a finding — just an inventory metric
