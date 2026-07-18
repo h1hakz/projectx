@@ -176,15 +176,22 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install cdxgen
-        run: npm install -g @cyclonedx/cdxgen --omit=optional --ignore-scripts --min-release-age=2
+        run: |
+          npm --version
+          npm install -g @cyclonedx/cdxgen --omit=optional --ignore-scripts --min-release-age=2
+          cdxgen --version || echo "cdxgen install failed"
 
       - name: Generate SBOM
-        run: cdxgen -o sbom.cdx.json .
+        run: |
+          cdxgen --version
+          cdxgen -o sbom.cdx.json .
+          ls -la sbom.cdx.json
         env:
           FETCH_LICENSE: true
 
       - name: Validate SBOM
         run: |
+          python --version
           python - <<'PY'
           import json, sys
           d = json.load(open("sbom.cdx.json"))
@@ -196,7 +203,12 @@ jobs:
           PY
 
       - name: Check license compliance
-        run: python scripts/check-sbom-licenses.py > sbom-license-results.json || true
+        run: |
+          python --version
+          python scripts/check-sbom-licenses.py > sbom-license-results.json || true
+          echo "=== sbom-license-results.json ==="
+          cat sbom-license-results.json || echo "(file missing)"
+          echo "=== end ==="
 
       - name: Upload SBOM results
         if: always()
