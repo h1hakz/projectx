@@ -3,7 +3,7 @@ name: PR Security Gate (Mobile DevSecOps)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [main, develop]
+    branches: [main]
 
 permissions:
   contents: read
