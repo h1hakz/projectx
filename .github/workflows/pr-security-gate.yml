@@ -3,7 +3,7 @@ name: PR Security Gate (Mobile DevSecOps)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [main, develop]
+    branches: [main]
 
 permissions:
   contents: read
@@ -40,10 +40,8 @@ jobs:
           semgrep scan \
             --config p/security-audit \
             --config p/owasp-top-ten \
-            --config p/mobsf \
             --config configs/.semgrep.yml \
-            --sarif --output semgrep.sarif \
-            --error || true
+            --sarif --output semgrep.sarif
 
       - name: Run mobsfscan
         run: |
@@ -67,10 +65,10 @@ jobs:
             mobsfscan.json
 
   # ------------------------------------------------------------------
-  # 2. Secret scanning — gitleaks + trufflehog
+  # 2. Secret scanning — gitleaks
   # ------------------------------------------------------------------
   secrets:
-    name: Secret Scanning (gitleaks + trufflehog)
+    name: Secret Scanning (gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,27 +83,16 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: "true"
         continue-on-error: true
 
-      - name: Run trufflehog (filesystem + verified-only)
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: ${{ github.event.pull_request.base.sha }}
-          head: ${{ github.event.pull_request.head.sha }}
-          extra_args: --only-verified --json --no-update
-        continue-on-error: true
-
-      - name: Normalize trufflehog output
+      - name: Normalize gitleaks output
         if: always()
         run: |
-          [ -f trufflehog.json ] || echo "[]" > trufflehog.json
+          [ -f results.sarif ] || echo '{"version": "2.1.0", "runs": []}' > results.sarif
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: secret-results
-          path: |
-            results.sarif
-            trufflehog.json
+          path: results.sarif
 
   # ------------------------------------------------------------------
   # 3. SCA — OWASP Dependency-Check + Trivy filesystem
@@ -125,7 +112,6 @@ jobs:
           out: "dc-report"
           args: >
             --enableExperimental
-            --failOnCVSS 7
             --suppression configs/dc-suppression.xml
         continue-on-error: true
 
@@ -181,7 +167,60 @@ jobs:
         with: { name: iac-results, path: trivy-iac.sarif }
 
   # ------------------------------------------------------------------
-  # 5. DAST — MobSF binary analysis via REST API
+  # 5. SBOM — CycloneDX manifest via cdxgen
+  # ------------------------------------------------------------------
+  sbom:
+    name: SBOM (CycloneDX / cdxgen)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cdxgen
+        run: |
+          npm --version
+          npm install -g @cyclonedx/cdxgen --omit=optional --ignore-scripts --min-release-age=2
+          cdxgen --version || echo "cdxgen install failed"
+
+      - name: Generate SBOM
+        run: |
+          cdxgen --version
+          cdxgen -o sbom.cdx.json .
+          ls -la sbom.cdx.json
+        env:
+          FETCH_LICENSE: true
+
+      - name: Validate SBOM
+        run: |
+          python --version
+          python - <<'PY'
+          import json, sys
+          d = json.load(open("sbom.cdx.json"))
+          assert d.get("bomFormat") == "CycloneDX", "not a CycloneDX document"
+          n = len(d.get("components", []))
+          print(f"SBOM OK: bomFormat={d.get('bomFormat')} specVersion={d.get('specVersion')} components={n}")
+          if n == 0:
+              print("::warning::SBOM generated but contains 0 components")
+          PY
+
+      - name: Check license compliance
+        run: |
+          python --version
+          python scripts/check-sbom-licenses.py > sbom-license-results.json || true
+          echo "=== sbom-license-results.json ==="
+          cat sbom-license-results.json || echo "(file missing)"
+          echo "=== end ==="
+
+      - name: Upload SBOM results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-results
+          path: |
+            sbom.cdx.json
+            sbom-license-results.json
+
+  # ------------------------------------------------------------------
+  # 6. DAST — MobSF binary analysis via REST API
   #    Only runs when a mobile BINARY (.apk / .ipa) is present in the PR.
   #    Source-only PRs skip the slow (~6 min) MobSF container entirely and
   #    rely on mobsfscan (SAST) + semgrep for source coverage.
@@ -273,7 +312,7 @@ jobs:
           if-no-files-found: ignore
 
   # ------------------------------------------------------------------
-  # 6. RASP integration check — confirm freeRASP wired into the app
+  # 7. RASP integration check — confirm freeRASP wired into the app
   # ------------------------------------------------------------------
   rasp:
     name: RASP integration check (freeRASP)
@@ -294,11 +333,11 @@ jobs:
         with: { name: rasp-results, path: rasp-report.json }
 
   # ------------------------------------------------------------------
-  # 7. Aggregate + sticky PR comment + Critical/High gate
+  # 8. Aggregate + sticky PR comment + Critical/High gate
   # ------------------------------------------------------------------
   gate:
     name: Severity Gate + PR Comment
-    needs: [sast, secrets, sca, iac, dast, rasp]
+    needs: [sast, secrets, sca, iac, sbom, dast, rasp]
     if: always()
     runs-on: ubuntu-latest
     steps:

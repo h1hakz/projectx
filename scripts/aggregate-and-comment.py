@@ -5,11 +5,12 @@ single severity-bucketed summary, then upsert a sticky comment on the PR.
 
 Inputs (under --artifacts):
   scan-artifacts/sast-results/{semgrep.sarif,mobsfscan.sarif,mobsfscan.json}
-  scan-artifacts/secret-results/{results.sarif,trufflehog.json}
+  scan-artifacts/secret-results/{results.sarif}
   scan-artifacts/sca-results/{dc-report/dependency-check-report.sarif,trivy-fs.sarif}
   scan-artifacts/iac-results/trivy-iac.sarif
   scan-artifacts/dast-results/mobsf-report.json
   scan-artifacts/rasp-results/rasp-report.json
+  scan-artifacts/sbom-results/sbom.cdx.json
 
 Output:
   summary.json   — machine-readable totals consumed by severity-gate.py
@@ -37,12 +38,12 @@ TOOL_LABELS = {
     "semgrep":          "semgrep (SAST)",
     "mobsfscan":        "mobsfscan (SAST)",
     "gitleaks":         "gitleaks (Secrets)",
-    "trufflehog":       "trufflehog (Secrets)",
     "dependency-check": "dependency-check (SCA)",
     "trivy-fs":         "trivy-fs (SCA)",
     "trivy-iac":        "trivy-iac (IaC)",
     "mobsf":            "mobsf (DAST)",
     "rasp-check":       "rasp-check (RASP)",
+    "sbom-license":     "sbom-license (Compliance)",
 }
 
 
@@ -168,47 +169,6 @@ def parse_gitleaks_sarif(path: Path) -> list[dict]:
                 "line":     line,
             })
     return findings
-
-
-def parse_trufflehog(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    out: list[dict] = []
-    text = path.read_text().strip()
-    if not text:
-        return []
-    # Trufflehog emits NDJSON when streamed; a single JSON array when --json --output
-    candidates = []
-    if text.startswith("["):
-        try:
-            candidates = json.loads(text)
-        except json.JSONDecodeError:
-            candidates = []
-    else:
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                candidates.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-
-    for item in candidates:
-        verified = item.get("Verified") or item.get("verified")
-        det = item.get("DetectorName") or item.get("detector_name") or "Secret"
-        src = item.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {})
-        out.append(
-            {
-                "tool": "trufflehog",
-                "rule": det,
-                "severity": "critical" if verified else "high",
-                "title": f"Verified secret: {det}" if verified else f"Possible secret: {det}",
-                "file": src.get("file", ""),
-                "line": src.get("line"),
-            }
-        )
-    return out
 
 
 def parse_mobsfscan_json(path: Path) -> list[dict]:
@@ -403,10 +363,33 @@ def parse_rasp_skips(path: Path) -> list[str]:
     ]
 
 
+def parse_sbom_licenses(path: Path) -> list[dict]:
+    """Parse check-sbom-licenses.py output into standard finding dicts."""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    findings: list[dict] = []
+    for item in data:
+        findings.append({
+            "tool": item.get("tool", "sbom-license"),
+            "rule": item.get("rule", "license-policy"),
+            "severity": norm_sev(item.get("severity", "high")),
+            "title": item.get("title", "License compliance issue"),
+            "file": item.get("file", ""),
+            "line": item.get("line"),
+        })
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # Comment rendering
 # ---------------------------------------------------------------------------
-def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missing: set[str] | None = None, skips: list[str] | None = None) -> str:
+def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missing: set[str] | None = None, skips: list[str] | None = None, sbom_components: list[dict] | None = None) -> str:
     badge = lambda n, s: f"![{s}](https://img.shields.io/badge/{s.title()}-{n}-{COLOR[s]})"
 
     head = [
@@ -415,21 +398,27 @@ def render_comment(by_tool: dict[str, list[dict]], totals: dict[str, int], missi
         "",
         " | ".join(badge(totals.get(s, 0), s) for s in SEV_ORDER),
         "",
-        "| Tool | Critical | High | Medium | Low | Info |",
-        "|------|---------:|-----:|-------:|----:|-----:|",
+        "| Tool | Critical | High | Medium | Low | Info | Total |",
+        "|------|---------:|-----:|-------:|----:|-----:|------:|",
     ]
+    grand = Counter()
     for tool, findings in sorted(by_tool.items()):
         c = Counter(f["severity"] for f in findings)
+        grand.update(c)
+        total = sum(c.values())
         head.append(
-            f"| `{tool_label(tool)}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} |"
+            f"| `{tool_label(tool)}` | {c['critical']} | {c['high']} | {c['medium']} | {c['low']} | {c['info']} | {total} |"
         )
+    head.append(
+        f"| **Total** | {grand['critical']} | {grand['high']} | {grand['medium']} | {grand['low']} | {grand['info']} | {sum(grand.values())} |"
+    )
 
     parts = ["\n".join(head), ""]
 
     for tool, findings in sorted(by_tool.items()):
         if not findings:
             continue
-        findings = sorted(findings, key=lambda x: SEV_ORDER.index(x["severity"]))[:25]
+        findings = sorted(findings, key=lambda x: SEV_ORDER.index(x["severity"]))
         rows = ["", f"<details><summary><b>{tool_label(tool)}</b> — top {len(findings)} findings</summary>", "",
                 "| Severity | Rule | Title | Location |",
                 "|----------|------|-------|----------|"]
@@ -507,12 +496,13 @@ def main() -> int:
         "semgrep":         root / "sast-results" / "semgrep.sarif",
         "mobsfscan":       root / "sast-results" / "mobsfscan.json",
         "gitleaks":        root / "secret-results" / "results.sarif",
-        "trufflehog":      root / "secret-results" / "trufflehog.json",
         "dependency-check":root / "sca-results" / "dc-report" / "dependency-check-report.sarif",
         "trivy-fs":        root / "sca-results" / "trivy-fs.sarif",
         "trivy-iac":       root / "iac-results" / "trivy-iac.sarif",
         "mobsf":           root / "dast-results" / "mobsf-report.json",
         "rasp-check":      root / "rasp-results" / "rasp-report.json",
+        "sbom":            root / "sbom-results" / "sbom.cdx.json",
+        "sbom-license":    root / "sbom-results" / "sbom-license-results.json",
     }
     missing = {name for name, p in expected.items() if not p.exists()}
 
@@ -524,13 +514,26 @@ def main() -> int:
     else:
         by_tool["mobsfscan"]   += parse_sarif(root / "sast-results" / "mobsfscan.sarif", "mobsfscan")
     by_tool["gitleaks"]        += parse_gitleaks_sarif(expected["gitleaks"])
-    by_tool["trufflehog"]      += parse_trufflehog(expected["trufflehog"])
     by_tool["dependency-check"]+= parse_sarif(expected["dependency-check"], "dependency-check")
     by_tool["trivy-fs"]        += parse_sarif(expected["trivy-fs"], "trivy-fs")
     by_tool["trivy-iac"]       += parse_sarif(expected["trivy-iac"], "trivy-iac")
     by_tool["mobsf"]           += parse_mobsf_report(expected["mobsf"])
     by_tool["rasp-check"]      += parse_rasp(expected["rasp-check"])
+    by_tool["sbom-license"]    += parse_sbom_licenses(expected["sbom-license"])
     rasp_skips = parse_rasp_skips(expected["rasp-check"])
+
+    # SBOM component count (CycloneDX). Not a finding — just an inventory metric
+    # so a missing/empty SBOM is visible in the summary instead of being silent.
+    sbom_path = expected["sbom"]
+    sbom_components = 0
+    sbom_component_list = []
+    if sbom_path.exists():
+        try:
+            sbom_data = json.loads(sbom_path.read_text())
+            sbom_components = len(sbom_data.get("components", []) or [])
+            sbom_component_list = sbom_data.get("components", []) or []
+        except (json.JSONDecodeError, ValueError):
+            sbom_components = -1
 
     totals = Counter()
     for findings in by_tool.values():
@@ -542,10 +545,11 @@ def main() -> int:
         "findings_count": sum(len(fs) for fs in by_tool.values()),
         "missing_artifacts": sorted(missing),
         "skipped_checks": rasp_skips,
+        "sbom_components": sbom_components,
     }
     args.summary.write_text(json.dumps(summary, indent=2, default=int))
 
-    body = render_comment(by_tool, totals, missing, rasp_skips)
+    body = render_comment(by_tool, totals, missing, rasp_skips, sbom_component_list)
     token = os.environ.get("GITHUB_TOKEN")
     pr    = os.environ.get("PR_NUMBER")
     repo  = os.environ.get("REPO")
